@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -173,8 +174,12 @@ func TestShouldPromptAliasSetupWhenInstalledCheckFails(t *testing.T) {
 			CX: config.AliasEntry{Enabled: true},
 		},
 	}
-	if !shouldPromptAliasSetup(cfg, "codex") {
-		t.Fatalf("expected prompt when enabled flag is stale")
+	got := shouldPromptAliasSetup(cfg, "codex")
+	if runtime.GOOS == "windows" && !got {
+		t.Fatalf("expected prompt when enabled flag is stale on windows")
+	}
+	if runtime.GOOS != "windows" && got {
+		t.Fatalf("did not expect stale-check prompt on non-windows")
 	}
 }
 
