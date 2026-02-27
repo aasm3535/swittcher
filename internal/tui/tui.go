@@ -1359,7 +1359,7 @@ func viewWidth(width, target int) int {
 
 func swittcherLogo() string {
 	return strings.TrimSpace(`
- _____       _ _   _      _
+  _____       _ _   _      _
 /  ___|     (_) | | |    | |
 \ ` + "`" + `--. _ __  _| |_| |_ __| |__   ___ _ __
  ` + "`" + `--. \ '_ \| | __| __/ _' '_ \ / _ \ '__|
