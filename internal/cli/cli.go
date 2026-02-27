@@ -18,11 +18,12 @@ const (
 )
 
 type Options struct {
-	Command   Command
-	CodexOnly bool
-	ConfigDir string
-	AddApp    string
-	AddName   string
+	Command     Command
+	CodexOnly   bool
+	ShowVersion bool
+	ConfigDir   string
+	AddApp      string
+	AddName     string
 }
 
 func Parse(args []string) (Options, error) {
@@ -34,6 +35,8 @@ func Parse(args []string) (Options, error) {
 		switch {
 		case arg == "-h" || arg == "--help":
 			return Options{}, ErrHelp
+		case arg == "-v" || arg == "--version":
+			opts.ShowVersion = true
 		case arg == "--codex":
 			opts.CodexOnly = true
 		case arg == "--config-dir":
@@ -87,6 +90,7 @@ Commands:
 
 Flags:
   --codex               Jump directly to codex account list
+  -v, --version         Print version and exit
   --config-dir PATH     Override config directory (or use SWITTCHER_CONFIG_DIR)
   -h, --help            Show help
 `) + "\n"

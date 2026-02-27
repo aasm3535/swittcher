@@ -6,6 +6,7 @@
 # Go build cache/output
 bin/
 dist/
+.gocache/
 
 # OS/editor
 .DS_Store

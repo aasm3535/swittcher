@@ -14,6 +14,8 @@ import (
 	"github.com/aasm3535/swittcher/internal/tui"
 )
 
+var version = "dev"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -29,6 +31,10 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	}
+	if opts.ShowVersion {
+		fmt.Println(version)
+		return nil
 	}
 
 	store, err := config.NewStore(opts.ConfigDir)

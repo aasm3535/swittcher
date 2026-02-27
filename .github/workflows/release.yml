@@ -1,0 +1,195 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+  next-version:
+    name: Compute Next Version
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Checkout with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next patch tag
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags
+          latest="$(git tag -l 'v*' --sort=-v:refname | head -n 1 || true)"
+
+          if [[ -z "${latest}" ]]; then
+            next="v0.1.0"
+          else
+            if [[ ! "${latest}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Latest tag '${latest}' does not match vX.Y.Z" >&2
+              exit 1
+            fi
+            major="${BASH_REMATCH[1]}"
+            minor="${BASH_REMATCH[2]}"
+            patch="${BASH_REMATCH[3]}"
+            next="v${major}.${minor}.$((patch + 1))"
+          fi
+
+          echo "tag=${next}" >> "${GITHUB_OUTPUT}"
+          echo "next tag: ${next}"
+
+      - name: Ensure tag does not exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.bump.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag '${tag}' already exists on origin" >&2
+            exit 1
+          fi
+
+      - name: Create and push tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.bump.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "Release ${tag}"
+          git push origin "${tag}"
+
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: next-version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.next-version.outputs.tag }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and package artifact
+        id: package
+        shell: bash
+        env:
+          TAG: ${{ needs.next-version.outputs.tag }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+
+          clean_tag="${TAG#v}"
+          base="swittcher-${clean_tag}-${GOOS}-${GOARCH}"
+          out_dir="dist/${base}"
+          mkdir -p "${out_dir}"
+
+          bin_name="swittcher"
+          if [[ "${GOOS}" == "windows" ]]; then
+            bin_name="swittcher.exe"
+          fi
+
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build \
+            -trimpath \
+            -ldflags="-s -w -X main.version=${TAG}" \
+            -o "${out_dir}/${bin_name}" \
+            ./cmd/swittcher
+
+          if [[ "${GOOS}" == "windows" ]]; then
+            (cd dist && zip -rq "${base}.zip" "${base}")
+            asset="dist/${base}.zip"
+          else
+            tar -C dist -czf "dist/${base}.tar.gz" "${base}"
+            asset="dist/${base}.tar.gz"
+          fi
+
+          echo "asset=${asset}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swittcher-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.package.outputs.asset }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - next-version
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.next-version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(artifacts/*/*)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No artifacts were downloaded" >&2
+            exit 1
+          fi
+
+          gh release create "${TAG}" "${files[@]}" \
+            --title "${TAG}" \
+            --notes "Automated patch release for ${GITHUB_SHA}"

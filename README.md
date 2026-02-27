@@ -67,6 +67,12 @@ Codex shortcut:
 swittcher --codex
 ```
 
+Version:
+
+```sh
+swittcher --version
+```
+
 CLI add flow (still available):
 
 ```sh
@@ -88,3 +94,8 @@ Alias fallback view:
 
 - `c` - copy manual command
 - `Enter` / `Esc` - close fallback dialog
+
+## Releases
+
+- Every successful push to `main` creates the next patch tag (`vX.Y.Z`)
+- GitHub Release artifacts are generated for Linux, macOS, and Windows

@@ -40,3 +40,16 @@ func TestParseAddCommandWithGlobalFlagAfterSubcommand(t *testing.T) {
 		t.Fatalf("unexpected add args: app=%q name=%q", opts.AddApp, opts.AddName)
 	}
 }
+
+func TestParseVersionFlag(t *testing.T) {
+	opts, err := Parse([]string{"--version"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if !opts.ShowVersion {
+		t.Fatalf("expected --version to enable ShowVersion")
+	}
+	if opts.Command != CommandTUI {
+		t.Fatalf("expected tui command, got %q", opts.Command)
+	}
+}
