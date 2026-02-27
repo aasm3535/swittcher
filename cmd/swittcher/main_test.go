@@ -37,6 +37,44 @@ func TestInitialStateJumpAppAfterOnboarding(t *testing.T) {
 	}
 }
 
+func TestInitialStateShowsAliasPromptWhenMissingAliasAndProfileExists(t *testing.T) {
+	cfg := config.File{
+		OnboardingAccepted: true,
+		Profiles: []config.ProfileEntry{
+			{App: "codex", Name: "codex-1", Slot: 1},
+		},
+	}
+	state := initialTUIState(cfg, "")
+	if state.Screen != tui.ScreenAccountSlots {
+		t.Fatalf("expected account slots screen, got %q", state.Screen)
+	}
+	if state.CurrentAppID != "codex" {
+		t.Fatalf("expected current app codex, got %q", state.CurrentAppID)
+	}
+	if !state.ShowAliasPrompt {
+		t.Fatalf("expected alias prompt to be shown")
+	}
+}
+
+func TestInitialStateSkipsAliasPromptWhenEnabled(t *testing.T) {
+	cfg := config.File{
+		OnboardingAccepted: true,
+		Profiles: []config.ProfileEntry{
+			{App: "codex", Name: "codex-1", Slot: 1},
+		},
+		Alias: config.AliasConfig{
+			CX: config.AliasEntry{Enabled: true},
+		},
+	}
+	state := initialTUIState(cfg, "")
+	if state.ShowAliasPrompt {
+		t.Fatalf("did not expect alias prompt when cx alias enabled")
+	}
+	if state.Screen != tui.ScreenToolPicker {
+		t.Fatalf("expected tool picker screen, got %q", state.Screen)
+	}
+}
+
 func TestRunVersionFlag(t *testing.T) {
 	orig := os.Stdout
 	r, w, err := os.Pipe()
@@ -93,5 +131,21 @@ func TestShouldPromptAliasSetupPerApp(t *testing.T) {
 	}
 	if shouldPromptAliasSetup(cfg, "claude") {
 		t.Fatalf("did not expect claude alias prompt when cc is enabled")
+	}
+}
+
+func TestAliasPromptAppForConfig(t *testing.T) {
+	cfg := config.File{
+		Profiles: []config.ProfileEntry{
+			{App: "claude", Name: "claude-1", Slot: 1},
+		},
+	}
+	if got := aliasPromptAppForConfig(cfg); got != "claude" {
+		t.Fatalf("expected claude, got %q", got)
+	}
+
+	cfg.Alias.CC.Enabled = true
+	if got := aliasPromptAppForConfig(cfg); got != "" {
+		t.Fatalf("expected no prompt app, got %q", got)
 	}
 }

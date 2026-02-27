@@ -219,6 +219,7 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 
 			cfgNow, err := store.Read()
 			if err == nil && shouldPromptAliasSetup(cfgNow, action.AppID) {
+				state.CurrentAppID = action.AppID
 				state.ShowAliasPrompt = true
 			}
 		case tui.ActionEdit:
@@ -335,6 +336,13 @@ func initialTUIState(cfg config.File, jumpAppID string) tui.State {
 			CurrentAppID: jumpAppID,
 		}
 	}
+	if appID := aliasPromptAppForConfig(cfg); appID != "" {
+		return tui.State{
+			Screen:          tui.ScreenAccountSlots,
+			CurrentAppID:    appID,
+			ShowAliasPrompt: true,
+		}
+	}
 	return tui.State{Screen: tui.ScreenToolPicker}
 }
 
@@ -406,4 +414,25 @@ func aliasCommandForApp(appID string) (aliasName, targetFlag string) {
 	default:
 		return "cx", "--codex"
 	}
+}
+
+func aliasPromptAppForConfig(cfg config.File) string {
+	hasCodexProfile := false
+	hasClaudeProfile := false
+	for _, p := range cfg.Profiles {
+		switch strings.ToLower(strings.TrimSpace(p.App)) {
+		case "codex":
+			hasCodexProfile = true
+		case "claude":
+			hasClaudeProfile = true
+		}
+	}
+
+	if hasCodexProfile && !cfg.Alias.CX.Enabled {
+		return "codex"
+	}
+	if hasClaudeProfile && !cfg.Alias.CC.Enabled {
+		return "claude"
+	}
+	return ""
 }
