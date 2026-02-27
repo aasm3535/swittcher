@@ -271,7 +271,20 @@ func (m *model) View() string {
 func (m *model) updateWelcome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter", "ctrl+m":
-		return m.finish(Action{Kind: ActionAcceptWelcome})
+		if err := m.store.SetOnboardingAccepted(true); err != nil {
+			m.state.StatusMessage = fmt.Sprintf("Cannot save onboarding: %v", err)
+		} else {
+			m.cfg.OnboardingAccepted = true
+			m.state.StatusMessage = "Welcome complete"
+		}
+		m.mode = modeTools
+		m.state.Screen = ScreenToolPicker
+		m.state.ShowAliasPrompt = false
+		m.state.AliasFallbackCommand = ""
+		if m.toolIndex < 0 || m.toolIndex >= len(m.tools) {
+			m.toolIndex = 0
+		}
+		return m, nil
 	case "q", "esc", "ctrl+c":
 		return m.finish(Action{Kind: ActionQuit})
 	}

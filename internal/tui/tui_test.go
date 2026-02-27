@@ -7,6 +7,7 @@ import (
 
 	"github.com/aasm3535/swittcher/internal/config"
 	"github.com/aasm3535/swittcher/internal/driver"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestResolveInitialScreenPriority(t *testing.T) {
@@ -157,5 +158,27 @@ func TestNewModelKeepsFreshStatusMessage(t *testing.T) {
 	}, nil)
 	if strings.TrimSpace(m.state.StatusMessage) == "" {
 		t.Fatalf("expected fresh status message to remain visible")
+	}
+}
+
+func TestWelcomeEnterTransitionsToToolsWithoutQuit(t *testing.T) {
+	store, err := config.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("new store failed: %v", err)
+	}
+	m := newModel(
+		State{Screen: ScreenWelcome},
+		config.File{OnboardingAccepted: false},
+		[]driver.AppDriver{fakeDriver{id: "codex", name: "Codex CLI", available: true}},
+		store,
+	)
+
+	modelAny, _ := m.updateWelcome(tea.KeyMsg{Type: tea.KeyEnter})
+	got := modelAny.(*model)
+	if got.mode != modeTools {
+		t.Fatalf("expected tools mode, got %v", got.mode)
+	}
+	if got.action.Kind != "" {
+		t.Fatalf("did not expect quit action, got %q", got.action.Kind)
 	}
 }
