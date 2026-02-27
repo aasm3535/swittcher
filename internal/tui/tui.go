@@ -262,6 +262,10 @@ func (m *model) updateTools(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state.CurrentAppID = tool.ID
 		m.mode = modeSlots
 		m.refreshSlots(true)
+		if shouldPromptAliasFromConfig(m.cfg, tool.ID) {
+			m.mode = modeAliasPrompt
+			m.state.ShowAliasPrompt = true
+		}
 	case "q", "esc", "ctrl+c":
 		return m.finish(Action{Kind: ActionQuit})
 	}
@@ -1142,6 +1146,27 @@ func aliasPreviewForApp(appID string) (aliasName, preview string) {
 		return "cc", "cc -> swittcher --claude"
 	default:
 		return "cx", "cx -> swittcher --codex"
+	}
+}
+
+func shouldPromptAliasFromConfig(cfg config.File, appID string) bool {
+	hasProfile := false
+	for _, p := range cfg.Profiles {
+		if strings.EqualFold(strings.TrimSpace(p.App), strings.TrimSpace(appID)) {
+			hasProfile = true
+			break
+		}
+	}
+	if !hasProfile {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(appID)) {
+	case "codex":
+		return !cfg.Alias.CX.Enabled
+	case "claude":
+		return !cfg.Alias.CC.Enabled
+	default:
+		return false
 	}
 }
 

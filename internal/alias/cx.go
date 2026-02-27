@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -43,6 +45,10 @@ func InstallCC() (InstallResult, error) {
 }
 
 func InstallAlias(aliasName, targetFlag string) (InstallResult, error) {
+	if runtime.GOOS == "windows" {
+		return installAliasWindows(aliasName, targetFlag)
+	}
+
 	shell := DetectShell(runtime.GOOS, os.Getenv("SHELL"))
 	profile, err := profilePathForShell(shell)
 	if err != nil {
@@ -53,7 +59,7 @@ func InstallAlias(aliasName, targetFlag string) (InstallResult, error) {
 		return InstallResult{}, err
 	}
 	block := managedBlock(shell, aliasName, snippet)
-	_, err = upsertManagedBlockFile(profile, aliasName, block)
+	_, err = upsertManagedBlockFile(profile, aliasName, shell, block)
 	if err != nil {
 		return InstallResult{
 			Shell:   shell,
@@ -93,6 +99,8 @@ func BuildSnippetFor(shell, aliasName, targetFlag string) (string, error) {
 		return fmt.Sprintf("alias %s='swittcher %s'", aliasName, targetFlag), nil
 	case "powershell":
 		return fmt.Sprintf("function %s { swittcher %s $args }", aliasName, targetFlag), nil
+	case "cmd":
+		return fmt.Sprintf("doskey %s=swittcher %s $*", aliasName, targetFlag), nil
 	default:
 		return "", fmt.Errorf("unsupported shell %q", shell)
 	}
@@ -107,6 +115,8 @@ func DetectShell(goos, shellEnv string) string {
 		return "bash"
 	case strings.Contains(s, "pwsh"), strings.Contains(s, "powershell"):
 		return "powershell"
+	case strings.Contains(s, "cmd.exe"):
+		return "cmd"
 	}
 	if goos == "windows" {
 		return "powershell"
@@ -129,6 +139,8 @@ func profilePathForShell(shell string) (string, error) {
 			return override, nil
 		}
 		return filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"), nil
+	case "cmd":
+		return filepath.Join(home, ".swittcher", "cmd", "aliases.cmd"), nil
 	default:
 		return "", fmt.Errorf("unsupported shell %q", shell)
 	}
@@ -140,6 +152,10 @@ func sourceHint(shell, profile string) string {
 		return fmt.Sprintf("Run: source %s", profile)
 	case "powershell":
 		return "Restart PowerShell session to use alias"
+	case "cmd":
+		return "Restart CMD session to use alias"
+	case "windows":
+		return "Restart PowerShell/CMD sessions to use alias"
 	default:
 		return ""
 	}
@@ -161,23 +177,29 @@ func ManualInstallCommandFor(shell, profile, aliasName, targetFlag string) strin
 	case "powershell":
 		escaped := strings.ReplaceAll(profile, `"`, "`\"")
 		return fmt.Sprintf("$block = @'\n%s\n'@; New-Item -ItemType File -Force -Path \"%s\" | Out-Null; Add-Content -Path \"%s\" -Value \"`n$block`n\"", block, escaped, escaped)
+	case "cmd":
+		return fmt.Sprintf("echo %s>>\"%s\"", snippet, profile)
 	default:
 		return block
 	}
 }
 
 func managedBlock(shell, aliasName, snippet string) string {
-	startMarker, endMarker := markersForAlias(aliasName)
+	startMarker, endMarker := markersForAlias(aliasName, shell)
+	commentPrefix := "#"
+	if normalizeShell(shell) == "cmd" {
+		commentPrefix = "::"
+	}
 	return strings.TrimSpace(strings.Join([]string{
 		startMarker,
-		fmt.Sprintf("# shell: %s", normalizeShell(shell)),
+		fmt.Sprintf("%s shell: %s", commentPrefix, normalizeShell(shell)),
 		snippet,
 		endMarker,
 		"",
 	}, "\n"))
 }
 
-func upsertManagedBlockFile(profilePath, aliasName, block string) (bool, error) {
+func upsertManagedBlockFile(profilePath, aliasName, shell, block string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
 		return false, err
 	}
@@ -186,7 +208,7 @@ func upsertManagedBlockFile(profilePath, aliasName, block string) (bool, error) 
 		return false, err
 	}
 
-	startMarker, endMarker := markersForAlias(aliasName)
+	startMarker, endMarker := markersForAlias(aliasName, shell)
 	updated, changed := upsertManagedBlock(string(raw), block, startMarker, endMarker)
 	if !changed {
 		return false, nil
@@ -238,6 +260,8 @@ func normalizeShell(shell string) string {
 		return "bash"
 	case strings.Contains(s, "pwsh"), strings.Contains(s, "powershell"):
 		return "powershell"
+	case strings.Contains(s, "cmd"):
+		return "cmd"
 	default:
 		return s
 	}
@@ -260,12 +284,18 @@ func isValidAliasName(aliasName string) bool {
 	return true
 }
 
-func markersForAlias(aliasName string) (string, string) {
+func markersForAlias(aliasName, shell string) (string, string) {
+	startPrefix := "#"
+	endPrefix := "#"
+	if normalizeShell(shell) == "cmd" {
+		startPrefix = "::"
+		endPrefix = "::"
+	}
 	switch normalizeAliasName(aliasName) {
 	case "cc":
-		return startMarkerCC, endMarkerCC
+		return strings.Replace(startMarkerCC, "#", startPrefix, 1), strings.Replace(endMarkerCC, "#", endPrefix, 1)
 	default:
-		return startMarkerCX, endMarkerCX
+		return strings.Replace(startMarkerCX, "#", startPrefix, 1), strings.Replace(endMarkerCX, "#", endPrefix, 1)
 	}
 }
 
@@ -278,4 +308,208 @@ func aliasSpecForApp(appID string) (string, string, error) {
 	default:
 		return "", "", fmt.Errorf("unsupported app id for alias %q", appID)
 	}
+}
+
+func installAliasWindows(aliasName, targetFlag string) (InstallResult, error) {
+	psSnippet, err := BuildSnippetFor("powershell", aliasName, targetFlag)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	cmdSnippet, err := BuildSnippetFor("cmd", aliasName, targetFlag)
+	if err != nil {
+		return InstallResult{}, err
+	}
+
+	profiles, err := windowsPowerShellProfiles()
+	if err != nil {
+		return InstallResult{}, err
+	}
+	psBlock := managedBlock("powershell", aliasName, psSnippet)
+	for _, profile := range profiles {
+		if _, err := upsertManagedBlockFile(profile, aliasName, "powershell", psBlock); err != nil {
+			return InstallResult{
+				Shell:   "windows",
+				Profile: profile,
+				Snippet: psSnippet,
+			}, err
+		}
+	}
+
+	cmdProfile, err := profilePathForShell("cmd")
+	if err != nil {
+		return InstallResult{}, err
+	}
+	cmdBlock := managedBlock("cmd", aliasName, cmdSnippet)
+	if _, err := upsertManagedBlockFile(cmdProfile, aliasName, "cmd", cmdBlock); err != nil {
+		return InstallResult{
+			Shell:   "windows",
+			Profile: cmdProfile,
+			Snippet: cmdSnippet,
+		}, err
+	}
+	if err := ensureCmdAutoRun(cmdProfile); err != nil {
+		return InstallResult{
+			Shell:   "windows",
+			Profile: cmdProfile,
+			Snippet: cmdSnippet,
+		}, err
+	}
+
+	allProfiles := append([]string{}, profiles...)
+	allProfiles = append(allProfiles, cmdProfile)
+
+	return InstallResult{
+		Shell:      "windows",
+		Profile:    strings.Join(allProfiles, "; "),
+		Snippet:    psSnippet + "\n" + cmdSnippet,
+		Installed:  true,
+		SourceHint: sourceHint("windows", ""),
+	}, nil
+}
+
+func windowsPowerShellProfiles() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{
+		filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+		filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+	}
+	if override := strings.TrimSpace(os.Getenv("POWERSHELL_PROFILE")); override != "" {
+		paths = append([]string{override}, paths...)
+	}
+	return uniqueStrings(paths), nil
+}
+
+func uniqueStrings(items []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		norm := strings.ToLower(strings.TrimSpace(item))
+		if norm == "" || seen[norm] {
+			continue
+		}
+		seen[norm] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func ensureCmdAutoRun(aliasFile string) error {
+	current, err := readCmdAutoRun()
+	if err != nil {
+		return err
+	}
+	next := mergeCmdAutoRun(current, aliasFile)
+	if strings.TrimSpace(next) == strings.TrimSpace(current) {
+		return nil
+	}
+	cmd := exec.Command("reg", "add", `HKCU\Software\Microsoft\Command Processor`, "/v", "AutoRun", "/t", "REG_SZ", "/d", next, "/f")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("set cmd AutoRun: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func readCmdAutoRun() (string, error) {
+	cmd := exec.Command("reg", "query", `HKCU\Software\Microsoft\Command Processor`, "/v", "AutoRun")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		lower := strings.ToLower(string(out))
+		if strings.Contains(lower, "unable to find") || strings.Contains(lower, "не удается найти") {
+			return "", nil
+		}
+		return "", fmt.Errorf("query cmd AutoRun: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return parseRegQueryValue(string(out)), nil
+}
+
+func parseRegQueryValue(raw string) string {
+	re := regexp.MustCompile(`REG_[A-Z_]+`)
+	lines := strings.Split(raw, "\n")
+	for _, line := range lines {
+		m := re.FindStringIndex(line)
+		if m == nil {
+			continue
+		}
+		return strings.TrimSpace(line[m[1]:])
+	}
+	return ""
+}
+
+func mergeCmdAutoRun(current, aliasFile string) string {
+	snippet := fmt.Sprintf(`if exist "%s" call "%s"`, aliasFile, aliasFile)
+	if strings.Contains(strings.ToLower(current), strings.ToLower(aliasFile)) {
+		return strings.TrimSpace(current)
+	}
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return snippet
+	}
+	return current + " & " + snippet
+}
+
+func IsAliasInstalledForApp(appID string) (bool, error) {
+	aliasName, _, err := aliasSpecForApp(appID)
+	if err != nil {
+		return false, err
+	}
+
+	if runtime.GOOS != "windows" {
+		shell := DetectShell(runtime.GOOS, os.Getenv("SHELL"))
+		profile, err := profilePathForShell(shell)
+		if err != nil {
+			return false, err
+		}
+		return profileHasAliasMarker(profile, aliasName, shell)
+	}
+
+	profiles, err := windowsPowerShellProfiles()
+	if err != nil {
+		return false, err
+	}
+	for _, profile := range profiles {
+		ok, err := profileHasAliasMarker(profile, aliasName, "powershell")
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+
+	cmdProfile, err := profilePathForShell("cmd")
+	if err != nil {
+		return false, err
+	}
+	cmdMarker, err := profileHasAliasMarker(cmdProfile, aliasName, "cmd")
+	if err != nil {
+		return false, err
+	}
+	if !cmdMarker {
+		return false, nil
+	}
+	autoRun, err := readCmdAutoRun()
+	if err != nil {
+		return false, err
+	}
+	if !strings.Contains(strings.ToLower(autoRun), strings.ToLower(cmdProfile)) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func profileHasAliasMarker(profilePath, aliasName, shell string) (bool, error) {
+	raw, err := os.ReadFile(profilePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	startMarker, endMarker := markersForAlias(aliasName, shell)
+	content := string(raw)
+	return strings.Contains(content, startMarker) && strings.Contains(content, endMarker), nil
 }

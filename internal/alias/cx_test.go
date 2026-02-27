@@ -28,7 +28,7 @@ func TestBuildSnippetForCCPowerShell(t *testing.T) {
 func TestUpsertManagedBlockIdempotentPerAlias(t *testing.T) {
 	current := "# existing\n"
 	block := managedBlock("bash", "cx", "alias cx='swittcher --codex'")
-	startMarker, endMarker := markersForAlias("cx")
+	startMarker, endMarker := markersForAlias("cx", "bash")
 
 	next, changed := upsertManagedBlock(current, block, startMarker, endMarker)
 	if !changed {
@@ -45,11 +45,11 @@ func TestUpsertManagedBlockIdempotentPerAlias(t *testing.T) {
 
 func TestUpsertManagedBlockSeparatesCXAndCC(t *testing.T) {
 	cxBlock := managedBlock("bash", "cx", "alias cx='swittcher --codex'")
-	cxStart, cxEnd := markersForAlias("cx")
+	cxStart, cxEnd := markersForAlias("cx", "bash")
 	withCX, _ := upsertManagedBlock("", cxBlock, cxStart, cxEnd)
 
 	ccBlock := managedBlock("bash", "cc", "alias cc='swittcher --claude'")
-	ccStart, ccEnd := markersForAlias("cc")
+	ccStart, ccEnd := markersForAlias("cc", "bash")
 	withBoth, changed := upsertManagedBlock(withCX, ccBlock, ccStart, ccEnd)
 	if !changed {
 		t.Fatalf("expected cc insert to change file")
@@ -59,5 +59,27 @@ func TestUpsertManagedBlockSeparatesCXAndCC(t *testing.T) {
 	}
 	if !strings.Contains(withBoth, "alias cc='swittcher --claude'") {
 		t.Fatalf("expected cc alias to be added")
+	}
+}
+
+func TestBuildSnippetForCmd(t *testing.T) {
+	snippet, err := BuildSnippetFor("cmd", "cx", "--codex")
+	if err != nil {
+		t.Fatalf("build snippet failed: %v", err)
+	}
+	if !strings.Contains(snippet, "doskey cx=swittcher --codex $*") {
+		t.Fatalf("unexpected cmd snippet %q", snippet)
+	}
+}
+
+func TestMergeCmdAutoRun(t *testing.T) {
+	aliasFile := `C:\Users\destr\.swittcher\cmd\aliases.cmd`
+	next := mergeCmdAutoRun("", aliasFile)
+	if !strings.Contains(next, aliasFile) {
+		t.Fatalf("expected autorun to contain alias file, got %q", next)
+	}
+	again := mergeCmdAutoRun(next, aliasFile)
+	if again != next {
+		t.Fatalf("expected idempotent autorun merge")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/aasm3535/swittcher/internal/alias"
@@ -16,6 +17,7 @@ import (
 )
 
 var version = "dev"
+var isAliasInstalledForApp = alias.IsAliasInstalledForApp
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -386,14 +388,26 @@ func prepareDriverProfile(appID, profileDir, provider, apiKey, baseURL, model, s
 }
 
 func shouldPromptAliasSetup(cfg config.File, appID string) bool {
+	enabled := false
 	switch strings.ToLower(strings.TrimSpace(appID)) {
 	case "codex":
-		return !cfg.Alias.CX.Enabled
+		enabled = cfg.Alias.CX.Enabled
 	case "claude":
-		return !cfg.Alias.CC.Enabled
+		enabled = cfg.Alias.CC.Enabled
 	default:
-		return false
+		return true
 	}
+	if !enabled {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		ok, err := isAliasInstalledForApp(appID)
+		if err != nil {
+			return true
+		}
+		return !ok
+	}
+	return false
 }
 
 func setAliasStatusForApp(store *config.Store, appID string, enabled bool, shell, lastError string) error {
@@ -428,10 +442,10 @@ func aliasPromptAppForConfig(cfg config.File) string {
 		}
 	}
 
-	if hasCodexProfile && !cfg.Alias.CX.Enabled {
+	if hasCodexProfile && shouldPromptAliasSetup(cfg, "codex") {
 		return "codex"
 	}
-	if hasClaudeProfile && !cfg.Alias.CC.Enabled {
+	if hasClaudeProfile && shouldPromptAliasSetup(cfg, "claude") {
 		return "claude"
 	}
 	return ""

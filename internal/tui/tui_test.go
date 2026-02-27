@@ -110,3 +110,21 @@ func TestDetectGLMPreset(t *testing.T) {
 		t.Fatalf("expected custom index -1, got %d", idx)
 	}
 }
+
+func TestShouldPromptAliasFromConfig(t *testing.T) {
+	cfg := config.File{
+		Profiles: []config.ProfileEntry{
+			{App: "codex", Name: "main", Slot: 1},
+		},
+	}
+	if !shouldPromptAliasFromConfig(cfg, "codex") {
+		t.Fatalf("expected codex alias prompt when disabled")
+	}
+	cfg.Alias.CX.Enabled = true
+	if shouldPromptAliasFromConfig(cfg, "codex") {
+		t.Fatalf("did not expect codex alias prompt when enabled")
+	}
+	if shouldPromptAliasFromConfig(cfg, "claude") {
+		t.Fatalf("did not expect claude alias prompt with no profiles")
+	}
+}

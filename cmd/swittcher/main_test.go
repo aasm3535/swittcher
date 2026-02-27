@@ -57,6 +57,10 @@ func TestInitialStateShowsAliasPromptWhenMissingAliasAndProfileExists(t *testing
 }
 
 func TestInitialStateSkipsAliasPromptWhenEnabled(t *testing.T) {
+	origChecker := isAliasInstalledForApp
+	isAliasInstalledForApp = func(appID string) (bool, error) { return true, nil }
+	defer func() { isAliasInstalledForApp = origChecker }()
+
 	cfg := config.File{
 		OnboardingAccepted: true,
 		Profiles: []config.ProfileEntry{
@@ -116,6 +120,10 @@ func TestAliasCommandForApp(t *testing.T) {
 }
 
 func TestShouldPromptAliasSetupPerApp(t *testing.T) {
+	origChecker := isAliasInstalledForApp
+	isAliasInstalledForApp = func(appID string) (bool, error) { return true, nil }
+	defer func() { isAliasInstalledForApp = origChecker }()
+
 	cfg := config.File{}
 	if !shouldPromptAliasSetup(cfg, "codex") {
 		t.Fatalf("expected codex alias prompt when cx is disabled")
@@ -135,6 +143,10 @@ func TestShouldPromptAliasSetupPerApp(t *testing.T) {
 }
 
 func TestAliasPromptAppForConfig(t *testing.T) {
+	origChecker := isAliasInstalledForApp
+	isAliasInstalledForApp = func(appID string) (bool, error) { return true, nil }
+	defer func() { isAliasInstalledForApp = origChecker }()
+
 	cfg := config.File{
 		Profiles: []config.ProfileEntry{
 			{App: "claude", Name: "claude-1", Slot: 1},
@@ -147,5 +159,20 @@ func TestAliasPromptAppForConfig(t *testing.T) {
 	cfg.Alias.CC.Enabled = true
 	if got := aliasPromptAppForConfig(cfg); got != "" {
 		t.Fatalf("expected no prompt app, got %q", got)
+	}
+}
+
+func TestShouldPromptAliasSetupWhenInstalledCheckFails(t *testing.T) {
+	origChecker := isAliasInstalledForApp
+	isAliasInstalledForApp = func(appID string) (bool, error) { return false, nil }
+	defer func() { isAliasInstalledForApp = origChecker }()
+
+	cfg := config.File{
+		Alias: config.AliasConfig{
+			CX: config.AliasEntry{Enabled: true},
+		},
+	}
+	if !shouldPromptAliasSetup(cfg, "codex") {
+		t.Fatalf("expected prompt when enabled flag is stale")
 	}
 }
