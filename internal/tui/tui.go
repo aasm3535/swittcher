@@ -239,7 +239,7 @@ func (m *model) View() string {
 
 func (m *model) updateWelcome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter":
+	case "enter", "ctrl+m":
 		return m.finish(Action{Kind: ActionAcceptWelcome})
 	case "q", "esc", "ctrl+c":
 		return m.finish(Action{Kind: ActionQuit})
@@ -805,8 +805,7 @@ func (m *model) isAddSlotSelected() bool {
 
 func (m *model) renderWelcome() string {
 	content := panelStyle().Width(viewWidth(m.width, 70)).Render(
-		titleStyle().Render("swittcher") + "\n\n" +
-			logoStyle().Render(swittcherLogo()) + "\n\n" +
+		logoStyle().Render(swittcherLogo()) + "\n\n" +
 			bodyStyle().Render("Official login flows. Isolated profiles. No token sharing.\nProvider limits/policies are controlled by providers.") + "\n\n" +
 			hintStyle().Render("[enter] Continue   [q] Exit"),
 	)
