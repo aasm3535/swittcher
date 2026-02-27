@@ -136,6 +136,9 @@ func TestSetProfileDetails(t *testing.T) {
 		Plan:      "pro",
 		AccountID: "acc-1",
 		Tag:       "work",
+		Provider:  "zai",
+		BaseURL:   "https://api.z.ai/api/anthropic",
+		Model:     "glm-4.6",
 	}
 	if err := store.SetProfileDetails("codex", "one", details); err != nil {
 		t.Fatalf("set profile details failed: %v", err)
@@ -153,6 +156,15 @@ func TestSetProfileDetails(t *testing.T) {
 	}
 	if list[0].Tag != details.Tag {
 		t.Fatalf("expected tag %q, got %q", details.Tag, list[0].Tag)
+	}
+	if list[0].Provider != details.Provider {
+		t.Fatalf("expected provider %q, got %q", details.Provider, list[0].Provider)
+	}
+	if list[0].BaseURL != details.BaseURL {
+		t.Fatalf("expected base_url %q, got %q", details.BaseURL, list[0].BaseURL)
+	}
+	if list[0].Model != details.Model {
+		t.Fatalf("expected model %q, got %q", details.Model, list[0].Model)
 	}
 	if list[0].TagColor == "" {
 		t.Fatalf("expected computed tag color")
@@ -184,6 +196,30 @@ func TestSetOnboardingAccepted(t *testing.T) {
 	}
 	if len(raw) == 0 {
 		t.Fatalf("expected non-empty config file")
+	}
+}
+
+func TestSetAliasCCStatus(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := NewStore(tmp)
+	if err != nil {
+		t.Fatalf("new store failed: %v", err)
+	}
+	store.now = func() time.Time { return time.Unix(1234, 0).UTC() }
+
+	if err := store.SetAliasCCStatus(true, "powershell", ""); err != nil {
+		t.Fatalf("set alias cc status failed: %v", err)
+	}
+
+	cfg, err := store.Read()
+	if err != nil {
+		t.Fatalf("read config failed: %v", err)
+	}
+	if !cfg.Alias.CC.Enabled {
+		t.Fatalf("expected alias cc enabled")
+	}
+	if cfg.Alias.CC.InstalledAt == "" {
+		t.Fatalf("expected alias cc installed_at to be set")
 	}
 }
 

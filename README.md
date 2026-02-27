@@ -7,7 +7,7 @@ Cross-platform Bubble Tea TUI account switcher for CLI tools.
 ## Current support
 
 - Codex CLI (`codex`)
-- Claude Code entry is visible in UI as `in development`
+- Claude Code (`claude`)
 
 ## What changed in this build
 
@@ -78,6 +78,7 @@ CLI add flow (still available):
 ```sh
 swittcher add codex
 swittcher add codex work
+swittcher add claude work
 ```
 
 ## TUI keys
@@ -94,6 +95,26 @@ Alias fallback view:
 
 - `c` - copy manual command
 - `Enter` / `Esc` - close fallback dialog
+
+## Claude modes
+
+Claude profiles support two modes in add flow:
+
+- `account` (regular Anthropic login/session)
+- `zai` (API gateway mode)
+
+For `zai` mode, swittcher stores profile-local settings and applies:
+
+- `ANTHROPIC_AUTH_TOKEN`
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_MODEL`
+- `ANTHROPIC_SMALL_FAST_MODEL`
+
+Default Z.AI values:
+
+- Base URL: `https://api.z.ai/api/anthropic`
+- Model: `glm-4.6`
+- Small/Fast model: `glm-4.6-flash`
 
 ## Releases
 

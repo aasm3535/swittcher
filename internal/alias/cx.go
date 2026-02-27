@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	startMarker = "# >>> swittcher cx >>>"
-	endMarker   = "# <<< swittcher cx <<<"
+	startMarkerCX = "# >>> swittcher cx >>>"
+	endMarkerCX   = "# <<< swittcher cx <<<"
+	startMarkerCC = "# >>> swittcher cc >>>"
+	endMarkerCC   = "# <<< swittcher cc <<<"
 )
 
 type InstallResult struct {
@@ -24,18 +26,34 @@ type InstallResult struct {
 	SourceHint string
 }
 
+func InstallForApp(appID string) (InstallResult, error) {
+	aliasName, targetFlag, err := aliasSpecForApp(appID)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	return InstallAlias(aliasName, targetFlag)
+}
+
 func InstallCX() (InstallResult, error) {
+	return InstallAlias("cx", "--codex")
+}
+
+func InstallCC() (InstallResult, error) {
+	return InstallAlias("cc", "--claude")
+}
+
+func InstallAlias(aliasName, targetFlag string) (InstallResult, error) {
 	shell := DetectShell(runtime.GOOS, os.Getenv("SHELL"))
 	profile, err := profilePathForShell(shell)
 	if err != nil {
 		return InstallResult{}, err
 	}
-	snippet, err := BuildSnippet(shell)
+	snippet, err := BuildSnippetFor(shell, aliasName, targetFlag)
 	if err != nil {
 		return InstallResult{}, err
 	}
-	block := managedBlock(shell, snippet)
-	_, err = upsertManagedBlockFile(profile, block)
+	block := managedBlock(shell, aliasName, snippet)
+	_, err = upsertManagedBlockFile(profile, aliasName, block)
 	if err != nil {
 		return InstallResult{
 			Shell:   shell,
@@ -57,11 +75,24 @@ func CopyToClipboard(text string) error {
 }
 
 func BuildSnippet(shell string) (string, error) {
+	return BuildSnippetFor(shell, "cx", "--codex")
+}
+
+func BuildSnippetFor(shell, aliasName, targetFlag string) (string, error) {
+	aliasName = normalizeAliasName(aliasName)
+	targetFlag = strings.TrimSpace(targetFlag)
+	if !isValidAliasName(aliasName) {
+		return "", fmt.Errorf("invalid alias name %q", aliasName)
+	}
+	if targetFlag == "" || !strings.HasPrefix(targetFlag, "--") {
+		return "", fmt.Errorf("invalid target flag %q", targetFlag)
+	}
+
 	switch normalizeShell(shell) {
 	case "bash", "zsh":
-		return "alias cx='swittcher --codex'", nil
+		return fmt.Sprintf("alias %s='swittcher %s'", aliasName, targetFlag), nil
 	case "powershell":
-		return "function cx { swittcher --codex $args }", nil
+		return fmt.Sprintf("function %s { swittcher %s $args }", aliasName, targetFlag), nil
 	default:
 		return "", fmt.Errorf("unsupported shell %q", shell)
 	}
@@ -108,18 +139,22 @@ func sourceHint(shell, profile string) string {
 	case "bash", "zsh":
 		return fmt.Sprintf("Run: source %s", profile)
 	case "powershell":
-		return "Restart PowerShell session to use cx"
+		return "Restart PowerShell session to use alias"
 	default:
 		return ""
 	}
 }
 
 func ManualInstallCommand(shell, profile string) string {
-	snippet, err := BuildSnippet(shell)
+	return ManualInstallCommandFor(shell, profile, "cx", "--codex")
+}
+
+func ManualInstallCommandFor(shell, profile, aliasName, targetFlag string) string {
+	snippet, err := BuildSnippetFor(shell, aliasName, targetFlag)
 	if err != nil {
 		return ""
 	}
-	block := managedBlock(shell, snippet)
+	block := managedBlock(shell, aliasName, snippet)
 	switch normalizeShell(shell) {
 	case "bash", "zsh":
 		return fmt.Sprintf("cat <<'EOF' >> \"%s\"\n%s\nEOF", profile, block)
@@ -131,7 +166,8 @@ func ManualInstallCommand(shell, profile string) string {
 	}
 }
 
-func managedBlock(shell, snippet string) string {
+func managedBlock(shell, aliasName, snippet string) string {
+	startMarker, endMarker := markersForAlias(aliasName)
 	return strings.TrimSpace(strings.Join([]string{
 		startMarker,
 		fmt.Sprintf("# shell: %s", normalizeShell(shell)),
@@ -141,7 +177,7 @@ func managedBlock(shell, snippet string) string {
 	}, "\n"))
 }
 
-func upsertManagedBlockFile(profilePath, block string) (bool, error) {
+func upsertManagedBlockFile(profilePath, aliasName, block string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
 		return false, err
 	}
@@ -150,7 +186,8 @@ func upsertManagedBlockFile(profilePath, block string) (bool, error) {
 		return false, err
 	}
 
-	updated, changed := upsertManagedBlock(string(raw), block)
+	startMarker, endMarker := markersForAlias(aliasName)
+	updated, changed := upsertManagedBlock(string(raw), block, startMarker, endMarker)
 	if !changed {
 		return false, nil
 	}
@@ -160,7 +197,7 @@ func upsertManagedBlockFile(profilePath, block string) (bool, error) {
 	return true, nil
 }
 
-func upsertManagedBlock(current, block string) (string, bool) {
+func upsertManagedBlock(current, block, startMarker, endMarker string) (string, bool) {
 	start := strings.Index(current, startMarker)
 	end := strings.Index(current, endMarker)
 	if start >= 0 && end >= start {
@@ -203,5 +240,42 @@ func normalizeShell(shell string) string {
 		return "powershell"
 	default:
 		return s
+	}
+}
+
+func normalizeAliasName(aliasName string) string {
+	return strings.ToLower(strings.TrimSpace(aliasName))
+}
+
+func isValidAliasName(aliasName string) bool {
+	if aliasName == "" {
+		return false
+	}
+	for _, r := range aliasName {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func markersForAlias(aliasName string) (string, string) {
+	switch normalizeAliasName(aliasName) {
+	case "cc":
+		return startMarkerCC, endMarkerCC
+	default:
+		return startMarkerCX, endMarkerCX
+	}
+}
+
+func aliasSpecForApp(appID string) (string, string, error) {
+	switch strings.ToLower(strings.TrimSpace(appID)) {
+	case "codex":
+		return "cx", "--codex", nil
+	case "claude":
+		return "cc", "--claude", nil
+	default:
+		return "", "", fmt.Errorf("unsupported app id for alias %q", appID)
 	}
 }

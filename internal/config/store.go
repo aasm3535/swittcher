@@ -32,6 +32,9 @@ type ProfileEntry struct {
 	AccountID  string `toml:"account_id,omitempty"`
 	Tag        string `toml:"tag,omitempty"`
 	TagColor   string `toml:"tag_color,omitempty"`
+	Provider   string `toml:"provider,omitempty"`
+	BaseURL    string `toml:"base_url,omitempty"`
+	Model      string `toml:"model,omitempty"`
 }
 
 type AliasEntry struct {
@@ -43,6 +46,7 @@ type AliasEntry struct {
 
 type AliasConfig struct {
 	CX AliasEntry `toml:"cx"`
+	CC AliasEntry `toml:"cc"`
 }
 
 type File struct {
@@ -59,6 +63,9 @@ type ProfileDetails struct {
 	Plan      string
 	AccountID string
 	Tag       string
+	Provider  string
+	BaseURL   string
+	Model     string
 }
 
 type Store struct {
@@ -386,6 +393,9 @@ func (s *Store) SetProfileDetails(appID, profileName string, details ProfileDeta
 		p.Plan = strings.TrimSpace(details.Plan)
 		p.AccountID = strings.TrimSpace(details.AccountID)
 		p.Tag = strings.TrimSpace(details.Tag)
+		p.Provider = strings.TrimSpace(details.Provider)
+		p.BaseURL = strings.TrimSpace(details.BaseURL)
+		p.Model = strings.TrimSpace(details.Model)
 		p.TagColor = ""
 		if p.Tag != "" {
 			p.TagColor = colorForTag(p.Tag)
@@ -465,6 +475,20 @@ func (s *Store) SetAliasCXStatus(enabled bool, shell, lastError string) error {
 	return s.Write(cfg)
 }
 
+func (s *Store) SetAliasCCStatus(enabled bool, shell, lastError string) error {
+	cfg, err := s.Read()
+	if err != nil {
+		return err
+	}
+	cfg.Alias.CC.Enabled = enabled
+	cfg.Alias.CC.Shell = strings.TrimSpace(shell)
+	cfg.Alias.CC.LastError = strings.TrimSpace(lastError)
+	if enabled {
+		cfg.Alias.CC.InstalledAt = s.now().UTC().Format(time.RFC3339)
+	}
+	return s.Write(cfg)
+}
+
 func resolveBaseDir(baseDir string) (string, error) {
 	if strings.TrimSpace(baseDir) != "" {
 		return filepath.Clean(baseDir), nil
@@ -513,6 +537,9 @@ func applyWriteDefaults(cfg File) File {
 	}
 	if cfg.Alias.CX.Shell == "" && runtime.GOOS == "windows" {
 		cfg.Alias.CX.Shell = "powershell"
+	}
+	if cfg.Alias.CC.Shell == "" && runtime.GOOS == "windows" {
+		cfg.Alias.CC.Shell = "powershell"
 	}
 	normalizeAllApps(&cfg)
 	return cfg

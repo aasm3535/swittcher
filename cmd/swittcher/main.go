@@ -10,6 +10,7 @@ import (
 	"github.com/aasm3535/swittcher/internal/cli"
 	"github.com/aasm3535/swittcher/internal/config"
 	"github.com/aasm3535/swittcher/internal/driver"
+	claudedrv "github.com/aasm3535/swittcher/internal/driver/claude"
 	"github.com/aasm3535/swittcher/internal/driver/codex"
 	"github.com/aasm3535/swittcher/internal/tui"
 )
@@ -46,12 +47,22 @@ func run(args []string) error {
 	if err := registry.Register(codex.New()); err != nil {
 		return err
 	}
+	if err := registry.Register(claudedrv.New()); err != nil {
+		return err
+	}
+	jumpAppID := ""
+	if opts.CodexOnly {
+		jumpAppID = "codex"
+	}
+	if opts.ClaudeOnly {
+		jumpAppID = "claude"
+	}
 
 	switch opts.Command {
 	case cli.CommandAdd:
 		return runAddCommand(store, registry, opts)
 	default:
-		return runTUI(store, registry, opts.CodexOnly)
+		return runTUI(store, registry, jumpAppID)
 	}
 }
 
@@ -83,18 +94,26 @@ func runAddCommand(store *config.Store, registry *driver.Registry, opts cli.Opti
 		_ = store.RemoveProfile(opts.AddApp, name)
 		return err
 	}
+	if err := prepareDriverProfile(opts.AddApp, profileDir, "", "", "", "", ""); err != nil {
+		_ = store.RemoveProfile(opts.AddApp, name)
+		return err
+	}
 
 	if err := drv.Login(profileDir); err != nil {
 		_ = store.RemoveProfile(opts.AddApp, name)
 		return err
 	}
 
-	_ = syncProfileDetails(store, drv, opts.AddApp, name, "", profileDir)
+	provider := ""
+	if opts.AddApp == "claude" {
+		provider = claudedrv.ProviderAccount
+	}
+	_ = syncProfileDetails(store, drv, opts.AddApp, name, "", provider, "", "", profileDir)
 	fmt.Printf("Account %q added for %s.\n", name, opts.AddApp)
 	return nil
 }
 
-func runTUI(store *config.Store, registry *driver.Registry, jumpCodex bool) error {
+func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) error {
 	cfg, err := store.Read()
 	if err != nil {
 		cfg = config.File{
@@ -102,7 +121,7 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpCodex bool) erro
 			DefaultSlots:       config.DefaultSlotsCount,
 		}
 	}
-	state := initialTUIState(cfg, jumpCodex)
+	state := initialTUIState(cfg, jumpAppID)
 
 	for {
 		action, nextState, err := tui.Run(state, registry.All(), store)
@@ -164,19 +183,42 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpCodex bool) erro
 				state.StatusMessage = fmt.Sprintf("Add failed: %v", err)
 				continue
 			}
+			if err := prepareDriverProfile(
+				action.AppID,
+				profileDir,
+				action.Provider,
+				action.APIKey,
+				action.BaseURL,
+				action.Model,
+				action.SmallModel,
+			); err != nil {
+				_ = store.RemoveProfile(action.AppID, action.ProfileName)
+				state.StatusMessage = fmt.Sprintf("Add failed: %v", err)
+				continue
+			}
 			if err := drv.Login(profileDir); err != nil {
 				_ = store.RemoveProfile(action.AppID, action.ProfileName)
 				state.StatusMessage = fmt.Sprintf("Login failed: %v", err)
 				continue
 			}
-			if err := syncProfileDetails(store, drv, action.AppID, action.ProfileName, action.Tag, profileDir); err != nil {
+			if err := syncProfileDetails(
+				store,
+				drv,
+				action.AppID,
+				action.ProfileName,
+				action.Tag,
+				action.Provider,
+				action.BaseURL,
+				action.Model,
+				profileDir,
+			); err != nil {
 				state.StatusMessage = fmt.Sprintf("Account added, metadata sync failed: %v", err)
 			} else {
 				state.StatusMessage = fmt.Sprintf("Account %q added", action.ProfileName)
 			}
 
 			cfgNow, err := store.Read()
-			if err == nil && !cfgNow.Alias.CX.Enabled {
+			if err == nil && shouldPromptAliasSetup(cfgNow, action.AppID) {
 				state.ShowAliasPrompt = true
 			}
 		case tui.ActionLaunch:
@@ -191,21 +233,26 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpCodex bool) erro
 			_ = store.MarkProfileUsed(action.AppID, action.ProfileName)
 			return drv.Launch(profileDir)
 		case tui.ActionSetupAlias:
-			result, err := alias.InstallCX()
+			aliasAppID := strings.TrimSpace(state.CurrentAppID)
+			if aliasAppID == "" {
+				aliasAppID = "codex"
+			}
+			aliasName, targetFlag := aliasCommandForApp(aliasAppID)
+			result, err := alias.InstallForApp(aliasAppID)
 			if err != nil {
-				_ = store.SetAliasCXStatus(false, result.Shell, err.Error())
+				_ = setAliasStatusForApp(store, aliasAppID, false, result.Shell, err.Error())
 				state.ShowAliasPrompt = false
-				state.AliasFallbackCommand = alias.ManualInstallCommand(result.Shell, result.Profile)
+				state.AliasFallbackCommand = alias.ManualInstallCommandFor(result.Shell, result.Profile, aliasName, targetFlag)
 				if strings.TrimSpace(state.AliasFallbackCommand) == "" {
 					state.AliasFallbackCommand = result.Snippet
 				}
 				state.StatusMessage = fmt.Sprintf("Alias auto-setup failed: %v", err)
 				continue
 			}
-			_ = store.SetAliasCXStatus(true, result.Shell, "")
+			_ = setAliasStatusForApp(store, aliasAppID, true, result.Shell, "")
 			state.ShowAliasPrompt = false
 			state.AliasFallbackCommand = ""
-			state.StatusMessage = "Alias cx configured. " + result.SourceHint
+			state.StatusMessage = fmt.Sprintf("Alias %s configured. %s", aliasName, result.SourceHint)
 		case tui.ActionSkipAliasSetup:
 			state.ShowAliasPrompt = false
 			state.StatusMessage = "Alias setup skipped"
@@ -222,26 +269,36 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpCodex bool) erro
 	}
 }
 
-func initialTUIState(cfg config.File, jumpCodex bool) tui.State {
+func initialTUIState(cfg config.File, jumpAppID string) tui.State {
 	if !cfg.OnboardingAccepted {
 		return tui.State{Screen: tui.ScreenWelcome}
 	}
-	if jumpCodex {
+	if strings.TrimSpace(jumpAppID) != "" {
 		return tui.State{
 			Screen:       tui.ScreenAccountSlots,
-			CurrentAppID: "codex",
+			CurrentAppID: jumpAppID,
 		}
 	}
 	return tui.State{Screen: tui.ScreenToolPicker}
 }
 
-func syncProfileDetails(store *config.Store, drv driver.AppDriver, appID, profileName, tag, profileDir string) error {
+func syncProfileDetails(
+	store *config.Store,
+	drv driver.AppDriver,
+	appID, profileName, tag, provider, baseURL, model, profileDir string,
+) error {
 	details := config.ProfileDetails{
-		Tag: tag,
+		Tag:      tag,
+		Provider: provider,
+		BaseURL:  baseURL,
+		Model:    model,
 	}
 	info, err := drv.ProfileInfo(profileDir)
 	if err == nil {
 		details.Email = info.Email
+		if strings.TrimSpace(details.Model) == "" {
+			details.Model = strings.TrimSpace(info.Plan)
+		}
 		details.Plan = info.Plan
 		details.AccountID = info.AccountID
 	}
@@ -249,4 +306,48 @@ func syncProfileDetails(store *config.Store, drv driver.AppDriver, appID, profil
 		return err
 	}
 	return nil
+}
+
+func prepareDriverProfile(appID, profileDir, provider, apiKey, baseURL, model, smallModel string) error {
+	if appID != "claude" {
+		return nil
+	}
+	return claudedrv.SaveProfileSettings(profileDir, claudedrv.ProfileSettings{
+		Provider:   provider,
+		APIKey:     apiKey,
+		BaseURL:    baseURL,
+		Model:      model,
+		SmallModel: smallModel,
+	})
+}
+
+func shouldPromptAliasSetup(cfg config.File, appID string) bool {
+	switch strings.ToLower(strings.TrimSpace(appID)) {
+	case "codex":
+		return !cfg.Alias.CX.Enabled
+	case "claude":
+		return !cfg.Alias.CC.Enabled
+	default:
+		return false
+	}
+}
+
+func setAliasStatusForApp(store *config.Store, appID string, enabled bool, shell, lastError string) error {
+	switch strings.ToLower(strings.TrimSpace(appID)) {
+	case "claude":
+		return store.SetAliasCCStatus(enabled, shell, lastError)
+	case "codex":
+		return store.SetAliasCXStatus(enabled, shell, lastError)
+	default:
+		return nil
+	}
+}
+
+func aliasCommandForApp(appID string) (aliasName, targetFlag string) {
+	switch strings.ToLower(strings.TrimSpace(appID)) {
+	case "claude":
+		return "cc", "--claude"
+	default:
+		return "cx", "--codex"
+	}
 }

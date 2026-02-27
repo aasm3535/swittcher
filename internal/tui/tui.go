@@ -6,6 +6,7 @@ import (
 
 	"github.com/aasm3535/swittcher/internal/config"
 	"github.com/aasm3535/swittcher/internal/driver"
+	claudedrv "github.com/aasm3535/swittcher/internal/driver/claude"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -71,6 +72,11 @@ type Action struct {
 	AppID       string
 	ProfileName string
 	Tag         string
+	Provider    string
+	APIKey      string
+	BaseURL     string
+	Model       string
+	SmallModel  string
 	Command     string
 	Slot        int
 }
@@ -102,6 +108,11 @@ type model struct {
 
 	addNameInput textinput.Model
 	addTagInput  textinput.Model
+	addProvider  string
+	addAPIKey    textinput.Model
+	addBaseURL   textinput.Model
+	addModel     textinput.Model
+	addSmall     textinput.Model
 	addFocus     int
 	addTarget    int
 
@@ -132,22 +143,18 @@ func Run(state State, drivers []driver.AppDriver, store *config.Store) (Action, 
 
 func newModel(state State, cfg config.File, drivers []driver.AppDriver, store *config.Store) *model {
 	m := &model{
-		state:     state,
-		cfg:       cfg,
-		store:     store,
-		drivers:   drivers,
-		driverMap: toDriverMap(drivers),
-		tools: []toolOption{
-			{ID: "codex", Title: "Codex", Description: "Ready", Enabled: true},
-			{ID: "claude-code", Title: "Claude Code", Description: "In development", Enabled: false},
-		},
+		state:          state,
+		cfg:            cfg,
+		store:          store,
+		drivers:        drivers,
+		driverMap:      toDriverMap(drivers),
+		tools:          buildToolOptions(drivers),
 		toolIndex:      max(0, state.Selected),
 		slotSelection:  max(0, state.Selected),
 		profilesBySlot: map[int]config.ProfileEntry{},
 	}
-
-	if d, ok := m.driverMap["codex"]; ok && !d.IsAvailable() {
-		m.tools[0].Description = "Codex CLI not found in PATH"
+	if len(m.tools) == 0 {
+		m.tools = []toolOption{{ID: "codex", Title: "Codex CLI", Description: "No drivers registered", Enabled: false}}
 	}
 
 	m.mode = modeFromScreen(resolveInitialScreen(cfg, state))
@@ -160,8 +167,8 @@ func newModel(state State, cfg config.File, drivers []driver.AppDriver, store *c
 	}
 
 	if m.mode == modeSlots || m.mode == modeAdd || m.mode == modeDeleteConfirm || m.mode == modeHelp {
-		if state.CurrentAppID == "" {
-			state.CurrentAppID = "codex"
+		if state.CurrentAppID == "" || m.driverMap[state.CurrentAppID] == nil {
+			state.CurrentAppID = m.defaultToolID()
 		}
 		m.state.CurrentAppID = state.CurrentAppID
 		m.refreshSlots(true)
@@ -244,7 +251,7 @@ func (m *model) updateTools(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		tool := m.tools[m.toolIndex]
 		if !tool.Enabled {
-			m.state.StatusMessage = fmt.Sprintf("%s is in development", tool.Title)
+			m.state.StatusMessage = fmt.Sprintf("%s is not available in PATH", tool.Title)
 			return m, nil
 		}
 		m.state.CurrentAppID = tool.ID
@@ -327,12 +334,35 @@ func (m *model) updateAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeSlots
 		return m, nil
 	case "tab", "shift+tab", "up", "down":
-		if m.addFocus == 0 {
-			m.addFocus = 1
+		maxFocus := m.addMaxFocus()
+		if maxFocus <= 0 {
+			return m, nil
+		}
+		if msg.String() == "shift+tab" || msg.String() == "up" {
+			m.addFocus--
+			if m.addFocus < 0 {
+				m.addFocus = maxFocus
+			}
 		} else {
-			m.addFocus = 0
+			m.addFocus++
+			if m.addFocus > maxFocus {
+				m.addFocus = 0
+			}
 		}
 		m.updateAddFocus()
+		return m, nil
+	case "m", "left", "right":
+		if m.isClaudeApp() {
+			if m.addProvider == claudedrv.ProviderZAI {
+				m.addProvider = claudedrv.ProviderAccount
+			} else {
+				m.addProvider = claudedrv.ProviderZAI
+			}
+			if m.addFocus > m.addMaxFocus() {
+				m.addFocus = 0
+			}
+			m.updateAddFocus()
+		}
 		return m, nil
 	case "enter":
 		name := strings.TrimSpace(m.addNameInput.Value())
@@ -346,20 +376,54 @@ func (m *model) updateAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			name = auto
 		}
 		tag := strings.TrimSpace(m.addTagInput.Value())
+
+		provider := ""
+		apiKey := ""
+		baseURL := ""
+		model := ""
+		smallModel := ""
+		if m.isClaudeApp() {
+			provider = m.addProvider
+			if provider == claudedrv.ProviderZAI {
+				apiKey = strings.TrimSpace(m.addAPIKey.Value())
+				baseURL = strings.TrimSpace(m.addBaseURL.Value())
+				model = strings.TrimSpace(m.addModel.Value())
+				smallModel = strings.TrimSpace(m.addSmall.Value())
+				if apiKey == "" {
+					m.state.StatusMessage = "API key is required for Z.AI mode"
+					return m, nil
+				}
+			}
+		}
+
 		return m.finish(Action{
 			Kind:        ActionAdd,
 			AppID:       m.state.CurrentAppID,
 			ProfileName: name,
 			Tag:         tag,
+			Provider:    provider,
+			APIKey:      apiKey,
+			BaseURL:     baseURL,
+			Model:       model,
+			SmallModel:  smallModel,
 			Slot:        m.addTarget,
 		})
 	}
 
 	var cmd tea.Cmd
-	if m.addFocus == 0 {
+	switch m.addFocus {
+	case 0:
 		m.addNameInput, cmd = m.addNameInput.Update(msg)
-	} else {
+	case 1:
 		m.addTagInput, cmd = m.addTagInput.Update(msg)
+	case 2:
+		m.addAPIKey, cmd = m.addAPIKey.Update(msg)
+	case 3:
+		m.addBaseURL, cmd = m.addBaseURL.Update(msg)
+	case 4:
+		m.addModel, cmd = m.addModel.Update(msg)
+	case 5:
+		m.addSmall, cmd = m.addSmall.Update(msg)
 	}
 	return m, cmd
 }
@@ -499,18 +563,76 @@ func (m *model) initAddInputs() {
 	m.addTagInput.CharLimit = 24
 	m.addTagInput.Width = 24
 
+	m.addProvider = claudedrv.ProviderAccount
+
+	m.addAPIKey = textinput.New()
+	m.addAPIKey.Placeholder = "required for Z.AI mode"
+	m.addAPIKey.CharLimit = 180
+	m.addAPIKey.Width = 42
+	m.addAPIKey.EchoMode = textinput.EchoPassword
+	m.addAPIKey.EchoCharacter = '•'
+
+	m.addBaseURL = textinput.New()
+	m.addBaseURL.Placeholder = claudedrv.DefaultZAIBaseURL
+	m.addBaseURL.SetValue(claudedrv.DefaultZAIBaseURL)
+	m.addBaseURL.CharLimit = 180
+	m.addBaseURL.Width = 42
+
+	m.addModel = textinput.New()
+	m.addModel.Placeholder = claudedrv.DefaultZAIModel
+	m.addModel.SetValue(claudedrv.DefaultZAIModel)
+	m.addModel.CharLimit = 80
+	m.addModel.Width = 42
+
+	m.addSmall = textinput.New()
+	m.addSmall.Placeholder = claudedrv.DefaultZAISmallFast
+	m.addSmall.SetValue(claudedrv.DefaultZAISmallFast)
+	m.addSmall.CharLimit = 80
+	m.addSmall.Width = 42
+
 	m.addFocus = 0
 	m.updateAddFocus()
 }
 
 func (m *model) updateAddFocus() {
-	if m.addFocus == 0 {
-		m.addNameInput.Focus()
-		m.addTagInput.Blur()
-	} else {
-		m.addTagInput.Focus()
-		m.addNameInput.Blur()
+	if m.addFocus > m.addMaxFocus() {
+		m.addFocus = 0
 	}
+	m.addNameInput.Blur()
+	m.addTagInput.Blur()
+	m.addAPIKey.Blur()
+	m.addBaseURL.Blur()
+	m.addModel.Blur()
+	m.addSmall.Blur()
+
+	switch m.addFocus {
+	case 0:
+		m.addNameInput.Focus()
+	case 1:
+		m.addTagInput.Focus()
+	case 2:
+		m.addAPIKey.Focus()
+	case 3:
+		m.addBaseURL.Focus()
+	case 4:
+		m.addModel.Focus()
+	case 5:
+		m.addSmall.Focus()
+	}
+}
+
+func (m *model) addMaxFocus() int {
+	if !m.isClaudeApp() {
+		return 1
+	}
+	if m.addProvider == claudedrv.ProviderZAI {
+		return 5
+	}
+	return 1
+}
+
+func (m *model) isClaudeApp() bool {
+	return m.state.CurrentAppID == "claude"
 }
 
 func (m *model) selectedSlot() int {
@@ -559,7 +681,7 @@ func (m *model) renderSlots() string {
 
 func (m *model) renderSidebar() string {
 	lines := make([]string, 0, m.slotCount+3)
-	lines = append(lines, sidebarSectionStyle().Render("Codex"))
+	lines = append(lines, sidebarSectionStyle().Render(m.currentToolTitle()))
 	for slot := 1; slot <= m.slotCount; slot++ {
 		selected := m.slotSelection == slot-1
 		p, ok := m.profilesBySlot[slot]
@@ -604,6 +726,9 @@ func (m *model) renderSlotDetails() string {
 			details := nonEmpty(
 				detailLine("Email", p.Email),
 				detailLine("Plan", p.Plan),
+				detailLine("Provider", p.Provider),
+				detailLine("Base URL", p.BaseURL),
+				detailLine("Model", p.Model),
 				detailLine("Tag", p.Tag),
 				detailLine("Account", p.AccountID),
 			)
@@ -631,9 +756,35 @@ func (m *model) renderAddForm() string {
 		fieldLabelStyle(m.addFocus == 0).Render("Profile Name (optional)") + "\n" +
 		m.addNameInput.View() + "\n\n" +
 		fieldLabelStyle(m.addFocus == 1).Render("Tag (optional)") + "\n" +
-		m.addTagInput.View() + "\n\n" +
-		hintStyle().Render("[tab] switch   [enter] login   [esc] cancel")
-	return layoutCenter(panelStyle().Width(viewWidth(m.width, 58)).Render(text), m.width, m.height)
+		m.addTagInput.View()
+
+	if m.isClaudeApp() {
+		modeLabel := "Anthropic account"
+		if m.addProvider == claudedrv.ProviderZAI {
+			modeLabel = "Z.AI API gateway"
+		}
+		text += "\n\n" +
+			bodyStyle().Render("Auth mode: "+modeLabel) + "\n" +
+			hintMutedStyle().Render("[m] toggle mode")
+		if m.addProvider == claudedrv.ProviderZAI {
+			text += "\n\n" +
+				fieldLabelStyle(m.addFocus == 2).Render("Z.AI API key") + "\n" +
+				m.addAPIKey.View() + "\n\n" +
+				fieldLabelStyle(m.addFocus == 3).Render("Base URL") + "\n" +
+				m.addBaseURL.View() + "\n\n" +
+				fieldLabelStyle(m.addFocus == 4).Render("Model") + "\n" +
+				m.addModel.View() + "\n\n" +
+				fieldLabelStyle(m.addFocus == 5).Render("Small/Fast Model") + "\n" +
+				m.addSmall.View()
+		}
+	}
+
+	text += "\n\n" + hintStyle().Render("[tab] switch   [enter] save   [esc] cancel")
+	targetWidth := 58
+	if m.isClaudeApp() {
+		targetWidth = 86
+	}
+	return layoutCenter(panelStyle().Width(viewWidth(m.width, targetWidth)).Render(text), m.width, m.height)
 }
 
 func (m *model) renderDeleteConfirm() string {
@@ -669,10 +820,11 @@ func (m *model) renderHelp() string {
 }
 
 func (m *model) renderAliasPrompt() string {
+	aliasName, preview := aliasPreviewForApp(m.state.CurrentAppID)
 	msg := strings.Join([]string{
-		"Create alias `cx` for quick start?",
+		fmt.Sprintf("Create alias `%s` for quick start?", aliasName),
 		"",
-		"cx -> swittcher --codex",
+		preview,
 		"",
 		"[y/enter] setup   [n] skip",
 	}, "\n")
@@ -711,6 +863,50 @@ func toDriverMap(drivers []driver.AppDriver) map[string]driver.AppDriver {
 		out[d.ID()] = d
 	}
 	return out
+}
+
+func buildToolOptions(drivers []driver.AppDriver) []toolOption {
+	out := make([]toolOption, 0, len(drivers))
+	for _, d := range drivers {
+		enabled := d.IsAvailable()
+		desc := "Ready"
+		if !enabled {
+			desc = "CLI not found in PATH"
+		}
+		out = append(out, toolOption{
+			ID:          d.ID(),
+			Title:       d.DisplayName(),
+			Description: desc,
+			Enabled:     enabled,
+		})
+	}
+	return out
+}
+
+func (m *model) defaultToolID() string {
+	if _, ok := m.driverMap["codex"]; ok {
+		return "codex"
+	}
+	if len(m.tools) > 0 {
+		return m.tools[0].ID
+	}
+	return ""
+}
+
+func (m *model) currentToolTitle() string {
+	if d, ok := m.driverMap[m.state.CurrentAppID]; ok {
+		return d.DisplayName()
+	}
+	return "Tool"
+}
+
+func aliasPreviewForApp(appID string) (aliasName, preview string) {
+	switch strings.ToLower(strings.TrimSpace(appID)) {
+	case "claude":
+		return "cc", "cc -> swittcher --claude"
+	default:
+		return "cx", "cx -> swittcher --codex"
+	}
 }
 
 func detailLine(label, value string) string {

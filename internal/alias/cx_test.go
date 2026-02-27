@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestBuildSnippetBash(t *testing.T) {
+func TestBuildSnippetBashDefaultCX(t *testing.T) {
 	snippet, err := BuildSnippet("bash")
 	if err != nil {
 		t.Fatalf("build snippet failed: %v", err)
@@ -15,29 +15,49 @@ func TestBuildSnippetBash(t *testing.T) {
 	}
 }
 
-func TestBuildSnippetPowerShell(t *testing.T) {
-	snippet, err := BuildSnippet("powershell")
+func TestBuildSnippetForCCPowerShell(t *testing.T) {
+	snippet, err := BuildSnippetFor("powershell", "cc", "--claude")
 	if err != nil {
 		t.Fatalf("build snippet failed: %v", err)
 	}
-	if !strings.Contains(snippet, "function cx") {
-		t.Fatalf("expected powershell function snippet, got %q", snippet)
+	if !strings.Contains(snippet, "function cc { swittcher --claude $args }") {
+		t.Fatalf("unexpected powershell snippet: %q", snippet)
 	}
 }
 
-func TestUpsertManagedBlockIdempotent(t *testing.T) {
+func TestUpsertManagedBlockIdempotentPerAlias(t *testing.T) {
 	current := "# existing\n"
-	block := managedBlock("bash", "alias cx='swittcher --codex'")
+	block := managedBlock("bash", "cx", "alias cx='swittcher --codex'")
+	startMarker, endMarker := markersForAlias("cx")
 
-	next, changed := upsertManagedBlock(current, block)
+	next, changed := upsertManagedBlock(current, block, startMarker, endMarker)
 	if !changed {
 		t.Fatalf("expected first insert to change file")
 	}
-	again, changed2 := upsertManagedBlock(next, block)
+	again, changed2 := upsertManagedBlock(next, block, startMarker, endMarker)
 	if changed2 {
 		t.Fatalf("expected second insert to be idempotent")
 	}
 	if next != again {
 		t.Fatalf("expected same content after second insert")
+	}
+}
+
+func TestUpsertManagedBlockSeparatesCXAndCC(t *testing.T) {
+	cxBlock := managedBlock("bash", "cx", "alias cx='swittcher --codex'")
+	cxStart, cxEnd := markersForAlias("cx")
+	withCX, _ := upsertManagedBlock("", cxBlock, cxStart, cxEnd)
+
+	ccBlock := managedBlock("bash", "cc", "alias cc='swittcher --claude'")
+	ccStart, ccEnd := markersForAlias("cc")
+	withBoth, changed := upsertManagedBlock(withCX, ccBlock, ccStart, ccEnd)
+	if !changed {
+		t.Fatalf("expected cc insert to change file")
+	}
+	if !strings.Contains(withBoth, "alias cx='swittcher --codex'") {
+		t.Fatalf("expected cx alias to remain")
+	}
+	if !strings.Contains(withBoth, "alias cc='swittcher --claude'") {
+		t.Fatalf("expected cc alias to be added")
 	}
 }

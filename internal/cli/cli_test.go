@@ -15,6 +15,26 @@ func TestParseCodexFlag(t *testing.T) {
 	}
 }
 
+func TestParseClaudeFlag(t *testing.T) {
+	opts, err := Parse([]string{"--claude"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if !opts.ClaudeOnly {
+		t.Fatalf("expected --claude to be true")
+	}
+	if opts.Command != CommandTUI {
+		t.Fatalf("expected tui command, got %q", opts.Command)
+	}
+}
+
+func TestParseMutuallyExclusiveJumpFlags(t *testing.T) {
+	_, err := Parse([]string{"--codex", "--claude"})
+	if err == nil {
+		t.Fatalf("expected conflict error for --codex and --claude")
+	}
+}
+
 func TestParseAddCommand(t *testing.T) {
 	opts, err := Parse([]string{"add", "codex", "work"})
 	if err != nil {

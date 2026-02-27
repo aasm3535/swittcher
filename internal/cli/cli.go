@@ -20,6 +20,7 @@ const (
 type Options struct {
 	Command     Command
 	CodexOnly   bool
+	ClaudeOnly  bool
 	ShowVersion bool
 	ConfigDir   string
 	AddApp      string
@@ -39,6 +40,8 @@ func Parse(args []string) (Options, error) {
 			opts.ShowVersion = true
 		case arg == "--codex":
 			opts.CodexOnly = true
+		case arg == "--claude":
+			opts.ClaudeOnly = true
 		case arg == "--config-dir":
 			if i+1 >= len(args) {
 				return Options{}, fmt.Errorf("--config-dir requires a value")
@@ -52,6 +55,10 @@ func Parse(args []string) (Options, error) {
 		default:
 			positionals = append(positionals, arg)
 		}
+	}
+
+	if opts.CodexOnly && opts.ClaudeOnly {
+		return Options{}, fmt.Errorf("--codex and --claude cannot be used together")
 	}
 
 	if len(positionals) == 0 {
@@ -82,7 +89,7 @@ func HelpText() string {
 swittcher - switch CLI accounts in isolated profile homes
 
 Usage:
-  swittcher [--codex] [--config-dir PATH]
+  swittcher [--codex|--claude] [--config-dir PATH]
   swittcher add <app> [profile-name] [--config-dir PATH]
 
 Commands:
@@ -90,6 +97,7 @@ Commands:
 
 Flags:
   --codex               Jump directly to codex account list
+  --claude              Jump directly to claude account list
   -v, --version         Print version and exit
   --config-dir PATH     Override config directory (or use SWITTCHER_CONFIG_DIR)
   -h, --help            Show help
