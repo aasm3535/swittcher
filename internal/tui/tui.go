@@ -673,10 +673,80 @@ func (m *model) renderTools() string {
 }
 
 func (m *model) renderSlots() string {
-	left := m.renderSidebar()
-	right := m.renderSlotDetails()
-	row := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	return layoutCenter(row, m.width, m.height)
+	lines := []string{
+		titleStyle().Render(fmt.Sprintf("%s Slots", m.currentToolTitle())),
+	}
+
+	for slot := 1; slot <= m.slotCount; slot++ {
+		selected := m.slotSelection == slot-1
+		prefix := "  "
+		if selected {
+			prefix = "> "
+		}
+		p, ok := m.profilesBySlot[slot]
+		badge := "[EMPTY]"
+		row := fmt.Sprintf("Slot %d %s", slot, badge)
+		if ok {
+			badge = "[SET]"
+			if strings.TrimSpace(p.Tag) != "" {
+				badge = "[" + strings.ToUpper(p.Tag) + "]"
+			}
+			row = fmt.Sprintf("Slot %d %s %s", slot, badge, p.Name)
+		}
+		lines = append(lines, sidebarItemStyle(selected).Render(prefix+row))
+	}
+
+	addPrefix := "  "
+	if m.isAddSlotSelected() {
+		addPrefix = "> "
+	}
+	lines = append(lines, sidebarItemStyle(m.isAddSlotSelected()).Render(addPrefix+"Add slot"))
+
+	selectedTitle, selectedMeta := m.selectedSlotSummary()
+	lines = append(
+		lines,
+		"",
+		bodyStyle().Render(selectedTitle),
+		bodyStyle().Render(strings.Join(selectedMeta, "\n")),
+		"",
+		renderStatusLine(m.state.StatusMessage, "[enter] launch/add   [a] add   [d] delete   [?] help   [q] back"),
+	)
+
+	content := panelStyle().
+		Width(viewWidth(m.width, 90)).
+		Render(strings.Join(lines, "\n"))
+	return layoutCenter(content, m.width, m.height)
+}
+
+func (m *model) selectedSlotSummary() (string, []string) {
+	if m.isAddSlotSelected() {
+		return "Selected: Add slot", []string{
+			"Create one more empty slot.",
+			fmt.Sprintf("Current slots: %d", m.slotCount),
+		}
+	}
+
+	slot := m.selectedSlot()
+	if p, ok := m.profilesBySlot[slot]; ok {
+		details := nonEmpty(
+			"Ready to launch this account.",
+			detailLine("Email", p.Email),
+			detailLine("Plan", p.Plan),
+			detailLine("Provider", p.Provider),
+			detailLine("Base URL", p.BaseURL),
+			detailLine("Model", p.Model),
+			detailLine("Tag", p.Tag),
+			detailLine("Account", p.AccountID),
+		)
+		if len(details) == 0 {
+			details = []string{"No metadata yet"}
+		}
+		return fmt.Sprintf("Selected: Slot %d · %s", slot, p.Name), details
+	}
+
+	return fmt.Sprintf("Selected: Slot %d", slot), []string{
+		"Empty slot. Press Enter to bind an account.",
+	}
 }
 
 func (m *model) renderSidebar() string {
