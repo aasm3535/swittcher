@@ -1,0 +1,12 @@
+# Build artifacts
+*.exe
+*.exe~
+*.out
+
+# Go build cache/output
+bin/
+dist/
+
+# OS/editor
+.DS_Store
+Thumbs.db
