@@ -181,6 +181,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.next-version.outputs.tag }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -191,5 +192,6 @@ jobs:
           fi
 
           gh release create "${TAG}" "${files[@]}" \
+            --repo "${REPO}" \
             --title "${TAG}" \
             --notes "Automated patch release for ${GITHUB_SHA}"
