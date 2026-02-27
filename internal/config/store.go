@@ -408,6 +408,77 @@ func (s *Store) SetProfileDetails(appID, profileName string, details ProfileDeta
 	return s.Write(cfg)
 }
 
+func (s *Store) RenameProfile(appID, oldName, newName string) error {
+	if err := validateSegment("app id", appID); err != nil {
+		return err
+	}
+	if err := validateSegment("old profile name", oldName); err != nil {
+		return err
+	}
+	if err := validateSegment("new profile name", newName); err != nil {
+		return err
+	}
+	if oldName == newName {
+		return nil
+	}
+
+	cfg, err := s.Read()
+	if err != nil {
+		return err
+	}
+
+	foundIdx := -1
+	for i := range cfg.Profiles {
+		p := cfg.Profiles[i]
+		if p.App != appID {
+			continue
+		}
+		if p.Name == newName {
+			return fmt.Errorf("profile %s/%s already exists", appID, newName)
+		}
+		if p.Name == oldName {
+			foundIdx = i
+		}
+	}
+	if foundIdx < 0 {
+		return fmt.Errorf("profile %s/%s not found", appID, oldName)
+	}
+
+	oldDir, err := s.ProfileDir(appID, oldName)
+	if err != nil {
+		return err
+	}
+	newDir, err := s.ProfileDir(appID, newName)
+	if err != nil {
+		return err
+	}
+
+	renamedOnDisk := false
+	if _, err := os.Stat(oldDir); err == nil {
+		if _, err := os.Stat(newDir); err == nil {
+			return fmt.Errorf("target profile directory already exists: %s", newDir)
+		}
+		if err := os.MkdirAll(filepath.Dir(newDir), 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(oldDir, newDir); err != nil {
+			return err
+		}
+		renamedOnDisk = true
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	cfg.Profiles[foundIdx].Name = newName
+	if err := s.Write(cfg); err != nil {
+		if renamedOnDisk {
+			_ = os.Rename(newDir, oldDir)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Store) MarkProfileUsed(appID, profileName string) error {
 	cfg, err := s.Read()
 	if err != nil {

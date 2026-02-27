@@ -98,3 +98,15 @@ func TestAliasPreviewForApp(t *testing.T) {
 		t.Fatalf("unexpected claude alias preview: %q %q", aliasName, preview)
 	}
 }
+
+func TestDetectGLMPreset(t *testing.T) {
+	if idx := detectGLMPreset("glm-4.6", "glm-4.6-flash"); idx != 0 {
+		t.Fatalf("expected balanced preset index 0, got %d", idx)
+	}
+	if idx := detectGLMPreset("glm-4.7", "glm-4.6-flash"); idx != 1 {
+		t.Fatalf("expected coding preset index 1, got %d", idx)
+	}
+	if idx := detectGLMPreset("custom", "custom"); idx != -1 {
+		t.Fatalf("expected custom index -1, got %d", idx)
+	}
+}

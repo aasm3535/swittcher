@@ -221,6 +221,62 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 			if err == nil && shouldPromptAliasSetup(cfgNow, action.AppID) {
 				state.ShowAliasPrompt = true
 			}
+		case tui.ActionEdit:
+			drv, ok := registry.Get(action.AppID)
+			if !ok {
+				state.StatusMessage = fmt.Sprintf("Unknown app %q", action.AppID)
+				continue
+			}
+
+			newName := strings.TrimSpace(action.ProfileName)
+			oldName := strings.TrimSpace(action.ExistingName)
+			if oldName == "" {
+				oldName = newName
+			}
+			if newName == "" {
+				state.StatusMessage = "Edit failed: profile name cannot be empty"
+				continue
+			}
+
+			if oldName != newName {
+				if err := store.RenameProfile(action.AppID, oldName, newName); err != nil {
+					state.StatusMessage = fmt.Sprintf("Edit failed: %v", err)
+					continue
+				}
+			}
+
+			profileDir, err := store.ProfileDir(action.AppID, newName)
+			if err != nil {
+				state.StatusMessage = fmt.Sprintf("Edit failed: %v", err)
+				continue
+			}
+			if err := prepareDriverProfile(
+				action.AppID,
+				profileDir,
+				action.Provider,
+				action.APIKey,
+				action.BaseURL,
+				action.Model,
+				action.SmallModel,
+			); err != nil {
+				state.StatusMessage = fmt.Sprintf("Edit failed: %v", err)
+				continue
+			}
+			if err := syncProfileDetails(
+				store,
+				drv,
+				action.AppID,
+				newName,
+				action.Tag,
+				action.Provider,
+				action.BaseURL,
+				action.Model,
+				profileDir,
+			); err != nil {
+				state.StatusMessage = fmt.Sprintf("Profile updated, metadata sync failed: %v", err)
+				continue
+			}
+			state.StatusMessage = fmt.Sprintf("Profile %q updated", newName)
 		case tui.ActionLaunch:
 			drv, ok := registry.Get(action.AppID)
 			if !ok {

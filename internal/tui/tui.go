@@ -57,6 +57,7 @@ const (
 	ActionQuit               ActionKind = "quit"
 	ActionAcceptWelcome      ActionKind = "accept_welcome"
 	ActionAdd                ActionKind = "add"
+	ActionEdit               ActionKind = "edit"
 	ActionAddSlot            ActionKind = "add_slot"
 	ActionDelete             ActionKind = "delete"
 	ActionDeleteSlot         ActionKind = "delete_slot"
@@ -68,17 +69,18 @@ const (
 )
 
 type Action struct {
-	Kind        ActionKind
-	AppID       string
-	ProfileName string
-	Tag         string
-	Provider    string
-	APIKey      string
-	BaseURL     string
-	Model       string
-	SmallModel  string
-	Command     string
-	Slot        int
+	Kind         ActionKind
+	AppID        string
+	ProfileName  string
+	ExistingName string
+	Tag          string
+	Provider     string
+	APIKey       string
+	BaseURL      string
+	Model        string
+	SmallModel   string
+	Command      string
+	Slot         int
 }
 
 type toolOption struct {
@@ -106,15 +108,18 @@ type model struct {
 	slotSelection  int // 0..slotCount, slotCount = add-slot row
 	profilesBySlot map[int]config.ProfileEntry
 
-	addNameInput textinput.Model
-	addTagInput  textinput.Model
-	addProvider  string
-	addAPIKey    textinput.Model
-	addBaseURL   textinput.Model
-	addModel     textinput.Model
-	addSmall     textinput.Model
-	addFocus     int
-	addTarget    int
+	addNameInput   textinput.Model
+	addTagInput    textinput.Model
+	addProvider    string
+	addAPIKey      textinput.Model
+	addBaseURL     textinput.Model
+	addModel       textinput.Model
+	addSmall       textinput.Model
+	addEditing     bool
+	addSourceName  string
+	glmPresetIndex int
+	addFocus       int
+	addTarget      int
 
 	deleteMode deleteTarget
 	deleteSlot int
@@ -299,6 +304,21 @@ func (m *model) updateSlots(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeAdd
 		m.addTarget = m.selectedSlot()
 		m.initAddInputs()
+	case "e":
+		if m.isAddSlotSelected() {
+			m.state.StatusMessage = "Select a slot with account first"
+			return m, nil
+		}
+		slot := m.selectedSlot()
+		p, ok := m.profilesBySlot[slot]
+		if !ok {
+			m.state.StatusMessage = "Slot is empty"
+			return m, nil
+		}
+		m.mode = modeAdd
+		m.addTarget = slot
+		m.initAddInputs()
+		m.startEditForm(slot, p)
 	case "d":
 		if m.isAddSlotSelected() {
 			return m, nil
@@ -361,12 +381,25 @@ func (m *model) updateAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.addFocus > m.addMaxFocus() {
 				m.addFocus = 0
 			}
+			if m.addProvider == claudedrv.ProviderZAI {
+				m.ensureGLMDefaults()
+				m.glmPresetIndex = detectGLMPreset(m.addModel.Value(), m.addSmall.Value())
+			}
 			m.updateAddFocus()
+		}
+		return m, nil
+	case "g":
+		if m.isClaudeApp() && m.addProvider == claudedrv.ProviderZAI {
+			m.applyNextGLMPreset()
 		}
 		return m, nil
 	case "enter":
 		name := strings.TrimSpace(m.addNameInput.Value())
-		if name == "" {
+		if m.addEditing {
+			if name == "" {
+				name = strings.TrimSpace(m.addSourceName)
+			}
+		} else if name == "" {
 			auto, err := m.store.NextProfileName(m.state.CurrentAppID)
 			if err != nil {
 				m.state.StatusMessage = fmt.Sprintf("Cannot generate profile name: %v", err)
@@ -396,17 +429,23 @@ func (m *model) updateAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		kind := ActionAdd
+		if m.addEditing {
+			kind = ActionEdit
+		}
+
 		return m.finish(Action{
-			Kind:        ActionAdd,
-			AppID:       m.state.CurrentAppID,
-			ProfileName: name,
-			Tag:         tag,
-			Provider:    provider,
-			APIKey:      apiKey,
-			BaseURL:     baseURL,
-			Model:       model,
-			SmallModel:  smallModel,
-			Slot:        m.addTarget,
+			Kind:         kind,
+			AppID:        m.state.CurrentAppID,
+			ProfileName:  name,
+			ExistingName: m.addSourceName,
+			Tag:          tag,
+			Provider:     provider,
+			APIKey:       apiKey,
+			BaseURL:      baseURL,
+			Model:        model,
+			SmallModel:   smallModel,
+			Slot:         m.addTarget,
 		})
 	}
 
@@ -424,6 +463,9 @@ func (m *model) updateAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.addModel, cmd = m.addModel.Update(msg)
 	case 5:
 		m.addSmall, cmd = m.addSmall.Update(msg)
+	}
+	if m.isClaudeApp() && m.addProvider == claudedrv.ProviderZAI {
+		m.glmPresetIndex = detectGLMPreset(m.addModel.Value(), m.addSmall.Value())
 	}
 	return m, cmd
 }
@@ -564,6 +606,8 @@ func (m *model) initAddInputs() {
 	m.addTagInput.Width = 24
 
 	m.addProvider = claudedrv.ProviderAccount
+	m.addEditing = false
+	m.addSourceName = ""
 
 	m.addAPIKey = textinput.New()
 	m.addAPIKey.Placeholder = "required for Z.AI mode"
@@ -590,6 +634,7 @@ func (m *model) initAddInputs() {
 	m.addSmall.CharLimit = 80
 	m.addSmall.Width = 42
 
+	m.glmPresetIndex = detectGLMPreset(m.addModel.Value(), m.addSmall.Value())
 	m.addFocus = 0
 	m.updateAddFocus()
 }
@@ -633,6 +678,117 @@ func (m *model) addMaxFocus() int {
 
 func (m *model) isClaudeApp() bool {
 	return m.state.CurrentAppID == "claude"
+}
+
+func (m *model) startEditForm(slot int, p config.ProfileEntry) {
+	m.addEditing = true
+	m.addSourceName = p.Name
+	m.addTarget = slot
+
+	m.addNameInput.SetValue(p.Name)
+	m.addTagInput.SetValue(p.Tag)
+
+	if !m.isClaudeApp() {
+		m.updateAddFocus()
+		return
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(p.Provider))
+	if provider != claudedrv.ProviderZAI {
+		provider = claudedrv.ProviderAccount
+	}
+	m.addProvider = provider
+
+	if strings.TrimSpace(p.BaseURL) != "" {
+		m.addBaseURL.SetValue(strings.TrimSpace(p.BaseURL))
+	}
+	if strings.TrimSpace(p.Model) != "" {
+		m.addModel.SetValue(strings.TrimSpace(p.Model))
+	}
+
+	profileDir, err := m.store.ProfileDir(m.state.CurrentAppID, p.Name)
+	if err == nil {
+		if settings, err := claudedrv.LoadProfileSettings(profileDir); err == nil {
+			m.addProvider = settings.Provider
+			if strings.TrimSpace(settings.APIKey) != "" {
+				m.addAPIKey.SetValue(settings.APIKey)
+			}
+			if strings.TrimSpace(settings.BaseURL) != "" {
+				m.addBaseURL.SetValue(settings.BaseURL)
+			}
+			if strings.TrimSpace(settings.Model) != "" {
+				m.addModel.SetValue(settings.Model)
+			}
+			if strings.TrimSpace(settings.SmallModel) != "" {
+				m.addSmall.SetValue(settings.SmallModel)
+			}
+		}
+	}
+
+	m.ensureGLMDefaults()
+	m.glmPresetIndex = detectGLMPreset(m.addModel.Value(), m.addSmall.Value())
+	m.updateAddFocus()
+}
+
+func (m *model) ensureGLMDefaults() {
+	if strings.TrimSpace(m.addBaseURL.Value()) == "" {
+		m.addBaseURL.SetValue(claudedrv.DefaultZAIBaseURL)
+	}
+	if strings.TrimSpace(m.addModel.Value()) == "" {
+		m.addModel.SetValue(claudedrv.DefaultZAIModel)
+	}
+	if strings.TrimSpace(m.addSmall.Value()) == "" {
+		m.addSmall.SetValue(claudedrv.DefaultZAISmallFast)
+	}
+}
+
+func (m *model) applyNextGLMPreset() {
+	presets := glmPresets()
+	if len(presets) == 0 {
+		return
+	}
+	if m.glmPresetIndex < 0 || m.glmPresetIndex >= len(presets) {
+		m.glmPresetIndex = 0
+	} else {
+		m.glmPresetIndex = (m.glmPresetIndex + 1) % len(presets)
+	}
+	p := presets[m.glmPresetIndex]
+	m.addModel.SetValue(p.Model)
+	m.addSmall.SetValue(p.SmallModel)
+}
+
+func (m *model) currentGLMPresetLabel() string {
+	presets := glmPresets()
+	if m.glmPresetIndex >= 0 && m.glmPresetIndex < len(presets) {
+		return presets[m.glmPresetIndex].Label
+	}
+	return "Custom"
+}
+
+type glmPreset struct {
+	Label      string
+	Model      string
+	SmallModel string
+}
+
+func glmPresets() []glmPreset {
+	return []glmPreset{
+		{Label: "Balanced", Model: claudedrv.DefaultZAIModel, SmallModel: claudedrv.DefaultZAISmallFast},
+		{Label: "Coding", Model: "glm-4.7", SmallModel: claudedrv.DefaultZAISmallFast},
+		{Label: "Max", Model: "glm-5", SmallModel: claudedrv.DefaultZAISmallFast},
+	}
+}
+
+func detectGLMPreset(model, smallModel string) int {
+	model = strings.ToLower(strings.TrimSpace(model))
+	smallModel = strings.ToLower(strings.TrimSpace(smallModel))
+	for i, p := range glmPresets() {
+		if model == strings.ToLower(strings.TrimSpace(p.Model)) &&
+			smallModel == strings.ToLower(strings.TrimSpace(p.SmallModel)) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *model) selectedSlot() int {
@@ -709,7 +865,7 @@ func (m *model) renderSlots() string {
 		bodyStyle().Render(selectedTitle),
 		bodyStyle().Render(strings.Join(selectedMeta, "\n")),
 		"",
-		renderStatusLine(m.state.StatusMessage, "[enter] launch/add   [a] add   [d] delete   [?] help   [q] back"),
+		renderStatusLine(m.state.StatusMessage, "[enter] launch/add   [a] add   [e] edit   [d] delete   [?] help   [q] back"),
 	)
 
 	content := panelStyle().
@@ -822,8 +978,15 @@ func (m *model) renderSlotDetails() string {
 
 func (m *model) renderAddForm() string {
 	slot := m.addTarget
-	text := titleStyle().Render(fmt.Sprintf("Bind Account to Slot %d", slot)) + "\n\n" +
-		fieldLabelStyle(m.addFocus == 0).Render("Profile Name (optional)") + "\n" +
+	title := fmt.Sprintf("Bind Account to Slot %d", slot)
+	nameLabel := "Profile Name (optional)"
+	if m.addEditing {
+		title = fmt.Sprintf("Edit Slot %d", slot)
+		nameLabel = "Profile Name"
+	}
+
+	text := titleStyle().Render(title) + "\n\n" +
+		fieldLabelStyle(m.addFocus == 0).Render(nameLabel) + "\n" +
 		m.addNameInput.View() + "\n\n" +
 		fieldLabelStyle(m.addFocus == 1).Render("Tag (optional)") + "\n" +
 		m.addTagInput.View()
@@ -838,6 +1001,8 @@ func (m *model) renderAddForm() string {
 			hintMutedStyle().Render("[m] toggle mode")
 		if m.addProvider == claudedrv.ProviderZAI {
 			text += "\n\n" +
+				bodyStyle().Render("GLM preset: "+m.currentGLMPresetLabel()) + "\n" +
+				hintMutedStyle().Render("[g] cycle preset") + "\n\n" +
 				fieldLabelStyle(m.addFocus == 2).Render("Z.AI API key") + "\n" +
 				m.addAPIKey.View() + "\n\n" +
 				fieldLabelStyle(m.addFocus == 3).Render("Base URL") + "\n" +
@@ -878,6 +1043,7 @@ func (m *model) renderHelp() string {
 		"  j/k       Move",
 		"  Enter     Launch/Add slot action",
 		"  a         Add account in selected slot",
+		"  e         Edit selected account",
 		"  d         Delete account or empty slot",
 		"  ?         Help",
 		"  q / esc   Back",

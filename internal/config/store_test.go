@@ -199,6 +199,54 @@ func TestSetOnboardingAccepted(t *testing.T) {
 	}
 }
 
+func TestRenameProfile(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := NewStore(tmp)
+	if err != nil {
+		t.Fatalf("new store failed: %v", err)
+	}
+
+	if err := store.AddProfileToSlot("codex", "work", 2); err != nil {
+		t.Fatalf("add profile failed: %v", err)
+	}
+	oldDir, err := store.ProfileDir("codex", "work")
+	if err != nil {
+		t.Fatalf("profile dir failed: %v", err)
+	}
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile dir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, "marker.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write marker failed: %v", err)
+	}
+
+	if err := store.RenameProfile("codex", "work", "work-2"); err != nil {
+		t.Fatalf("rename profile failed: %v", err)
+	}
+
+	list, err := store.ListProfiles("codex")
+	if err != nil {
+		t.Fatalf("list profiles failed: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(list))
+	}
+	if list[0].Name != "work-2" {
+		t.Fatalf("expected renamed profile work-2, got %q", list[0].Name)
+	}
+	if list[0].Slot != 2 {
+		t.Fatalf("expected slot preserved as 2, got %d", list[0].Slot)
+	}
+
+	newDir, err := store.ProfileDir("codex", "work-2")
+	if err != nil {
+		t.Fatalf("new profile dir failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(newDir, "marker.txt")); err != nil {
+		t.Fatalf("expected marker in renamed dir, stat failed: %v", err)
+	}
+}
+
 func TestSetAliasCCStatus(t *testing.T) {
 	tmp := t.TempDir()
 	store, err := NewStore(tmp)
