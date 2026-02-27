@@ -821,7 +821,7 @@ func (m *model) renderTools() string {
 	}
 
 	body := panelStyle().Width(viewWidth(m.width, 70)).Render(
-		titleStyle().Render("Tools") + "\n\n" +
+		titleStyle().Render("Swittcher") + "\n\n" +
 			strings.Join(lines, "\n") + "\n\n" +
 			renderStatusLine(m.state.StatusMessage, "[enter] Select   [j/k] Move   [q] Quit"),
 	)
