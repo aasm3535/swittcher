@@ -111,12 +111,13 @@ func (s *Store) Read() (File, error) {
 		}
 		return File{}, err
 	}
+	cleanRaw := bytes.ToValidUTF8(raw, []byte{})
 
 	var cfg File
-	if _, err := toml.Decode(string(raw), &cfg); err != nil {
+	if _, err := toml.Decode(string(cleanRaw), &cfg); err != nil {
 		return File{}, err
 	}
-	return applyReadDefaults(cfg, string(raw)), nil
+	return applyReadDefaults(cfg, string(cleanRaw)), nil
 }
 
 func (s *Store) Write(cfg File) error {
@@ -538,8 +539,8 @@ func (s *Store) SetAliasCXStatus(enabled bool, shell, lastError string) error {
 		return err
 	}
 	cfg.Alias.CX.Enabled = enabled
-	cfg.Alias.CX.Shell = strings.TrimSpace(shell)
-	cfg.Alias.CX.LastError = strings.TrimSpace(lastError)
+	cfg.Alias.CX.Shell = sanitizeUTF8(strings.TrimSpace(shell))
+	cfg.Alias.CX.LastError = sanitizeUTF8(strings.TrimSpace(lastError))
 	if enabled {
 		cfg.Alias.CX.InstalledAt = s.now().UTC().Format(time.RFC3339)
 	}
@@ -552,8 +553,8 @@ func (s *Store) SetAliasCCStatus(enabled bool, shell, lastError string) error {
 		return err
 	}
 	cfg.Alias.CC.Enabled = enabled
-	cfg.Alias.CC.Shell = strings.TrimSpace(shell)
-	cfg.Alias.CC.LastError = strings.TrimSpace(lastError)
+	cfg.Alias.CC.Shell = sanitizeUTF8(strings.TrimSpace(shell))
+	cfg.Alias.CC.LastError = sanitizeUTF8(strings.TrimSpace(lastError))
 	if enabled {
 		cfg.Alias.CC.InstalledAt = s.now().UTC().Format(time.RFC3339)
 	}
@@ -723,4 +724,8 @@ func colorForTag(tag string) string {
 	_, _ = h.Write([]byte(strings.ToLower(strings.TrimSpace(tag))))
 	idx := int(h.Sum32()) % len(palette)
 	return palette[idx]
+}
+
+func sanitizeUTF8(v string) string {
+	return strings.ToValidUTF8(v, "")
 }

@@ -271,6 +271,27 @@ func TestSetAliasCCStatus(t *testing.T) {
 	}
 }
 
+func TestReadSanitizesInvalidUTF8InConfig(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := NewStore(tmp)
+	if err != nil {
+		t.Fatalf("new store failed: %v", err)
+	}
+
+	raw := []byte("[alias]\n  [alias.cx]\n    enabled = false\n    last_error = \"bad\x8e\"\n")
+	if err := os.WriteFile(store.ConfigPath(), raw, 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfg, err := store.Read()
+	if err != nil {
+		t.Fatalf("read config failed: %v", err)
+	}
+	if cfg.Alias.CX.LastError != "bad" {
+		t.Fatalf("expected sanitized last_error 'bad', got %q", cfg.Alias.CX.LastError)
+	}
+}
+
 func TestSlotLifecycleRules(t *testing.T) {
 	tmp := t.TempDir()
 	store, err := NewStore(tmp)
