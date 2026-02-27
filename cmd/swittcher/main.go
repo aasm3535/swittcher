@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/aasm3535/swittcher/internal/alias"
 	"github.com/aasm3535/swittcher/internal/cli"
@@ -131,6 +132,8 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 			return err
 		}
 		state = nextState
+		prevStatus := state.StatusMessage
+		prevStatusTS := state.StatusSetAtUnix
 
 		switch action.Kind {
 		case tui.ActionQuit:
@@ -165,25 +168,25 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 			drv, ok := registry.Get(action.AppID)
 			if !ok {
 				state.StatusMessage = fmt.Sprintf("Unknown app %q", action.AppID)
-				continue
+				break
 			}
 			slot := action.Slot
 			if slot < 1 {
 				slot, err = store.NextAvailableSlot(action.AppID)
 				if err != nil {
 					state.StatusMessage = fmt.Sprintf("Add failed: %v", err)
-					continue
+					break
 				}
 			}
 			if err := store.AddProfileToSlot(action.AppID, action.ProfileName, slot); err != nil {
 				state.StatusMessage = fmt.Sprintf("Add failed: %v", err)
-				continue
+				break
 			}
 			profileDir, err := store.ProfileDir(action.AppID, action.ProfileName)
 			if err != nil {
 				_ = store.RemoveProfile(action.AppID, action.ProfileName)
 				state.StatusMessage = fmt.Sprintf("Add failed: %v", err)
-				continue
+				break
 			}
 			if err := prepareDriverProfile(
 				action.AppID,
@@ -196,12 +199,12 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 			); err != nil {
 				_ = store.RemoveProfile(action.AppID, action.ProfileName)
 				state.StatusMessage = fmt.Sprintf("Add failed: %v", err)
-				continue
+				break
 			}
 			if err := drv.Login(profileDir); err != nil {
 				_ = store.RemoveProfile(action.AppID, action.ProfileName)
 				state.StatusMessage = fmt.Sprintf("Login failed: %v", err)
-				continue
+				break
 			}
 			if err := syncProfileDetails(
 				store,
@@ -228,7 +231,7 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 			drv, ok := registry.Get(action.AppID)
 			if !ok {
 				state.StatusMessage = fmt.Sprintf("Unknown app %q", action.AppID)
-				continue
+				break
 			}
 
 			newName := strings.TrimSpace(action.ProfileName)
@@ -238,20 +241,20 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 			}
 			if newName == "" {
 				state.StatusMessage = "Edit failed: profile name cannot be empty"
-				continue
+				break
 			}
 
 			if oldName != newName {
 				if err := store.RenameProfile(action.AppID, oldName, newName); err != nil {
 					state.StatusMessage = fmt.Sprintf("Edit failed: %v", err)
-					continue
+					break
 				}
 			}
 
 			profileDir, err := store.ProfileDir(action.AppID, newName)
 			if err != nil {
 				state.StatusMessage = fmt.Sprintf("Edit failed: %v", err)
-				continue
+				break
 			}
 			if err := prepareDriverProfile(
 				action.AppID,
@@ -263,7 +266,7 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 				action.SmallModel,
 			); err != nil {
 				state.StatusMessage = fmt.Sprintf("Edit failed: %v", err)
-				continue
+				break
 			}
 			if err := syncProfileDetails(
 				store,
@@ -277,7 +280,7 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 				profileDir,
 			); err != nil {
 				state.StatusMessage = fmt.Sprintf("Profile updated, metadata sync failed: %v", err)
-				continue
+				break
 			}
 			state.StatusMessage = fmt.Sprintf("Profile %q updated", newName)
 		case tui.ActionLaunch:
@@ -306,7 +309,7 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 					state.AliasFallbackCommand = result.Snippet
 				}
 				state.StatusMessage = fmt.Sprintf("Alias auto-setup failed: %v", err)
-				continue
+				break
 			}
 			_ = setAliasStatusForApp(store, aliasAppID, true, result.Shell, "")
 			state.ShowAliasPrompt = false
@@ -325,6 +328,7 @@ func runTUI(store *config.Store, registry *driver.Registry, jumpAppID string) er
 			state.AliasFallbackCommand = ""
 		default:
 		}
+		updateStateStatusTimestamp(&state, prevStatus, prevStatusTS, time.Now().UTC())
 	}
 }
 
@@ -449,4 +453,17 @@ func aliasPromptAppForConfig(cfg config.File) string {
 		return "claude"
 	}
 	return ""
+}
+
+func updateStateStatusTimestamp(state *tui.State, previous string, previousTS int64, now time.Time) {
+	msg := strings.TrimSpace(state.StatusMessage)
+	if msg == "" {
+		state.StatusSetAtUnix = 0
+		return
+	}
+	if msg != strings.TrimSpace(previous) || previousTS == 0 {
+		state.StatusSetAtUnix = now.Unix()
+		return
+	}
+	state.StatusSetAtUnix = previousTS
 }

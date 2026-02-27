@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aasm3535/swittcher/internal/config"
 	"github.com/aasm3535/swittcher/internal/driver"
@@ -126,5 +127,35 @@ func TestShouldPromptAliasFromConfig(t *testing.T) {
 	}
 	if shouldPromptAliasFromConfig(cfg, "claude") {
 		t.Fatalf("did not expect claude alias prompt with no profiles")
+	}
+}
+
+func TestNewModelExpiresStaleStatusMessage(t *testing.T) {
+	cfg := config.File{OnboardingAccepted: true}
+	state := State{
+		Screen:          ScreenToolPicker,
+		StatusMessage:   "Deleted profile",
+		StatusSetAtUnix: time.Now().Add(-10 * time.Second).Unix(),
+	}
+	m := newModel(state, cfg, []driver.AppDriver{
+		fakeDriver{id: "codex", name: "Codex CLI", available: true},
+	}, nil)
+	if strings.TrimSpace(m.state.StatusMessage) != "" {
+		t.Fatalf("expected stale status message to expire, got %q", m.state.StatusMessage)
+	}
+}
+
+func TestNewModelKeepsFreshStatusMessage(t *testing.T) {
+	cfg := config.File{OnboardingAccepted: true}
+	state := State{
+		Screen:          ScreenToolPicker,
+		StatusMessage:   "Deleted profile",
+		StatusSetAtUnix: time.Now().Unix(),
+	}
+	m := newModel(state, cfg, []driver.AppDriver{
+		fakeDriver{id: "codex", name: "Codex CLI", available: true},
+	}, nil)
+	if strings.TrimSpace(m.state.StatusMessage) == "" {
+		t.Fatalf("expected fresh status message to remain visible")
 	}
 }

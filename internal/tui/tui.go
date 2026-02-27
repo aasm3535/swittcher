@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aasm3535/swittcher/internal/config"
 	"github.com/aasm3535/swittcher/internal/driver"
@@ -46,9 +47,17 @@ type State struct {
 	CurrentAppID         string
 	Selected             int
 	StatusMessage        string
+	StatusSetAtUnix      int64
 	ShowAliasPrompt      bool
 	AliasFallbackCommand string
 }
+
+const (
+	statusTTL          = 6 * time.Second
+	statusTickInterval = 1 * time.Second
+)
+
+type statusTickMsg struct{}
 
 type ActionKind string
 
@@ -180,10 +189,11 @@ func newModel(state State, cfg config.File, drivers []driver.AppDriver, store *c
 	}
 
 	m.initAddInputs()
+	m.expireStatusIfNeeded(time.Now().UTC())
 	return m
 }
 
-func (m *model) Init() tea.Cmd { return nil }
+func (m *model) Init() tea.Cmd { return statusTickCmd() }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -191,24 +201,45 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case statusTickMsg:
+		m.expireStatusIfNeeded(time.Now().UTC())
+		return m, statusTickCmd()
 	case tea.KeyMsg:
+		prevMsg := m.state.StatusMessage
+		prevTS := m.state.StatusSetAtUnix
 		switch m.mode {
 		case modeWelcome:
-			return m.updateWelcome(msg)
+			model, cmd := m.updateWelcome(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		case modeTools:
-			return m.updateTools(msg)
+			model, cmd := m.updateTools(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		case modeSlots:
-			return m.updateSlots(msg)
+			model, cmd := m.updateSlots(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		case modeAdd:
-			return m.updateAdd(msg)
+			model, cmd := m.updateAdd(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		case modeDeleteConfirm:
-			return m.updateDeleteConfirm(msg)
+			model, cmd := m.updateDeleteConfirm(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		case modeHelp:
-			return m.updateHelp(msg)
+			model, cmd := m.updateHelp(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		case modeAliasPrompt:
-			return m.updateAliasPrompt(msg)
+			model, cmd := m.updateAliasPrompt(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		case modeAliasFallback:
-			return m.updateAliasFallback(msg)
+			model, cmd := m.updateAliasFallback(msg)
+			m.updateStatusTimestamp(prevMsg, prevTS, time.Now().UTC())
+			return model, cmd
 		}
 	}
 	return m, nil
@@ -555,6 +586,39 @@ func (m *model) exportState() State {
 		out.Selected = m.slotSelection
 	}
 	return out
+}
+
+func statusTickCmd() tea.Cmd {
+	return tea.Tick(statusTickInterval, func(_ time.Time) tea.Msg {
+		return statusTickMsg{}
+	})
+}
+
+func (m *model) updateStatusTimestamp(prevMsg string, prevTS int64, now time.Time) {
+	curMsg := strings.TrimSpace(m.state.StatusMessage)
+	if curMsg == "" {
+		m.state.StatusSetAtUnix = 0
+		return
+	}
+	if curMsg != strings.TrimSpace(prevMsg) || prevTS == 0 {
+		m.state.StatusSetAtUnix = now.Unix()
+	}
+}
+
+func (m *model) expireStatusIfNeeded(now time.Time) {
+	msg := strings.TrimSpace(m.state.StatusMessage)
+	if msg == "" {
+		m.state.StatusSetAtUnix = 0
+		return
+	}
+	if m.state.StatusSetAtUnix == 0 {
+		m.state.StatusSetAtUnix = now.Unix()
+		return
+	}
+	if now.Unix()-m.state.StatusSetAtUnix >= int64(statusTTL/time.Second) {
+		m.state.StatusMessage = ""
+		m.state.StatusSetAtUnix = 0
+	}
 }
 
 func (m *model) selectionForCurrentMode() int {

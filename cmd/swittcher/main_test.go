@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/aasm3535/swittcher/internal/config"
 	"github.com/aasm3535/swittcher/internal/tui"
@@ -174,5 +175,20 @@ func TestShouldPromptAliasSetupWhenInstalledCheckFails(t *testing.T) {
 	}
 	if !shouldPromptAliasSetup(cfg, "codex") {
 		t.Fatalf("expected prompt when enabled flag is stale")
+	}
+}
+
+func TestUpdateStateStatusTimestamp(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	state := tui.State{StatusMessage: "Done"}
+	updateStateStatusTimestamp(&state, "", 0, now)
+	if state.StatusSetAtUnix != now.Unix() {
+		t.Fatalf("expected timestamp %d, got %d", now.Unix(), state.StatusSetAtUnix)
+	}
+
+	state.StatusMessage = ""
+	updateStateStatusTimestamp(&state, "Done", now.Unix(), now)
+	if state.StatusSetAtUnix != 0 {
+		t.Fatalf("expected zero timestamp for empty status")
 	}
 }
