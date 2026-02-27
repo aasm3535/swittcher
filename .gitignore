@@ -8,6 +8,9 @@ bin/
 dist/
 .gocache/
 
+# Local planning notes
+docs/plans/
+
 # OS/editor
 .DS_Store
 Thumbs.db
