@@ -172,13 +172,8 @@ func newModel(state State, cfg config.File, drivers []driver.AppDriver, store *c
 	}
 
 	m.mode = modeFromScreen(resolveInitialScreen(cfg, state))
-	if cfg.OnboardingAccepted {
-		if strings.TrimSpace(state.AliasFallbackCommand) != "" {
-			m.mode = modeAliasFallback
-		} else if state.ShowAliasPrompt {
-			m.mode = modeAliasPrompt
-		}
-	}
+	m.state.ShowAliasPrompt = false
+	m.state.AliasFallbackCommand = ""
 
 	if m.mode == modeSlots || m.mode == modeAdd || m.mode == modeDeleteConfirm || m.mode == modeHelp {
 		if state.CurrentAppID == "" || m.driverMap[state.CurrentAppID] == nil {
@@ -306,10 +301,6 @@ func (m *model) updateTools(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state.CurrentAppID = tool.ID
 		m.mode = modeSlots
 		m.refreshSlots(true)
-		if shouldPromptAliasFromConfig(m.cfg, tool.ID) {
-			m.mode = modeAliasPrompt
-			m.state.ShowAliasPrompt = true
-		}
 	case "q", "esc", "ctrl+c":
 		return m.finish(Action{Kind: ActionQuit})
 	}
@@ -901,7 +892,7 @@ func (m *model) renderTools() string {
 	}
 
 	body := panelStyle().Width(viewWidth(m.width, 70)).Render(
-		titleStyle().Render("Swittcher") + "\n\n" +
+		logoStyle().Render(swittcherLogo()) + "\n\n" +
 			strings.Join(lines, "\n") + "\n\n" +
 			renderStatusLine(m.state.StatusMessage, "[enter] Select   [j/k] Move   [q] Quit"),
 	)
@@ -1226,24 +1217,8 @@ func aliasPreviewForApp(appID string) (aliasName, preview string) {
 }
 
 func shouldPromptAliasFromConfig(cfg config.File, appID string) bool {
-	hasProfile := false
-	for _, p := range cfg.Profiles {
-		if strings.EqualFold(strings.TrimSpace(p.App), strings.TrimSpace(appID)) {
-			hasProfile = true
-			break
-		}
-	}
-	if !hasProfile {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(appID)) {
-	case "codex":
-		return !cfg.Alias.CX.Enabled
-	case "claude":
-		return !cfg.Alias.CC.Enabled
-	default:
-		return false
-	}
+	// Temporary kill switch: disable auto alias setup/prompt flow.
+	return false
 }
 
 func detailLine(label, value string) string {
@@ -1358,14 +1333,14 @@ func viewWidth(width, target int) int {
 }
 
 func swittcherLogo() string {
-	return strings.TrimSpace(`
-  _____       _ _   _      _
+	return strings.Trim(`
+ _____       _ _   _      _
 /  ___|     (_) | | |    | |
-\ ` + "`" + `--. _ __  _| |_| |_ __| |__   ___ _ __
- ` + "`" + `--. \ '_ \| | __| __/ _' '_ \ / _ \ '__|
+\ `+"`"+`--. _ __  _| |_| |_ __| |__   ___ _ __
+ `+"`"+`--. \ '_ \| | __| __/ _' '_ \ / _ \ '__|
 /\__/ / | | | | |_| || (_| | | |  __/ |
 \____/|_| |_|_|\__|\__\__,_| |_|\___|_|
-`)
+`, "\n")
 }
 
 func clamp(v, minV, maxV int) int {

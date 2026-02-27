@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
+	"golang.org/x/text/encoding/charmap"
 )
 
 const (
@@ -412,18 +413,51 @@ func ensureCmdAutoRun(aliasFile string) error {
 	}
 	return nil
 }
-
 func readCmdAutoRun() (string, error) {
 	cmd := exec.Command("reg", "query", `HKCU\Software\Microsoft\Command Processor`, "/v", "AutoRun")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		lower := strings.ToLower(string(out))
-		if strings.Contains(lower, "unable to find") || strings.Contains(lower, "не удается найти") {
+		if isCmdAutoRunNotFoundOutput(out) {
 			return "", nil
 		}
 		return "", fmt.Errorf("query cmd AutoRun: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return parseRegQueryValue(string(out)), nil
+}
+
+func isCmdAutoRunNotFoundOutput(out []byte) bool {
+	decoded := []string{string(out)}
+	for _, codec := range []struct {
+		decoder *charmap.Charmap
+	}{
+		{decoder: charmap.CodePage866},
+		{decoder: charmap.Windows1251},
+	} {
+		parsed, err := codec.decoder.NewDecoder().Bytes(out)
+		if err != nil {
+			continue
+		}
+		decoded = append(decoded, string(parsed))
+	}
+
+	russianNeedle1 := "\u043d\u0435 \u0443\u0434\u0430\u0435\u0442\u0441\u044f \u043d\u0430\u0439\u0442\u0438"
+	russianNeedle2 := "\u043d\u0435 \u0443\u0434\u0430\u0451\u0442\u0441\u044f \u043d\u0430\u0439\u0442\u0438"
+	russianRegistry := "\u0440\u0435\u0435\u0441\u0442"
+	russianSection := "\u0440\u0430\u0437\u0434\u0435\u043b"
+	russianParam := "\u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440"
+
+	for _, text := range decoded {
+		lower := strings.ToLower(text)
+		if strings.Contains(lower, "unable to find") || strings.Contains(lower, "cannot find") {
+			return true
+		}
+		if strings.Contains(lower, russianNeedle1) || strings.Contains(lower, russianNeedle2) {
+			if strings.Contains(lower, russianSection) || strings.Contains(lower, russianParam) || strings.Contains(lower, russianRegistry) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func parseRegQueryValue(raw string) string {

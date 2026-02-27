@@ -3,7 +3,6 @@ package main
 import (
 	"io"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 
@@ -39,7 +38,7 @@ func TestInitialStateJumpAppAfterOnboarding(t *testing.T) {
 	}
 }
 
-func TestInitialStateShowsAliasPromptWhenMissingAliasAndProfileExists(t *testing.T) {
+func TestInitialStateSkipsAliasPromptEvenWhenProfileExists(t *testing.T) {
 	cfg := config.File{
 		OnboardingAccepted: true,
 		Profiles: []config.ProfileEntry{
@@ -47,14 +46,11 @@ func TestInitialStateShowsAliasPromptWhenMissingAliasAndProfileExists(t *testing
 		},
 	}
 	state := initialTUIState(cfg, "")
-	if state.Screen != tui.ScreenAccountSlots {
-		t.Fatalf("expected account slots screen, got %q", state.Screen)
+	if state.ShowAliasPrompt {
+		t.Fatalf("did not expect alias prompt to be shown")
 	}
-	if state.CurrentAppID != "codex" {
-		t.Fatalf("expected current app codex, got %q", state.CurrentAppID)
-	}
-	if !state.ShowAliasPrompt {
-		t.Fatalf("expected alias prompt to be shown")
+	if state.Screen != tui.ScreenToolPicker {
+		t.Fatalf("expected tool picker screen, got %q", state.Screen)
 	}
 }
 
@@ -127,20 +123,20 @@ func TestShouldPromptAliasSetupPerApp(t *testing.T) {
 	defer func() { isAliasInstalledForApp = origChecker }()
 
 	cfg := config.File{}
-	if !shouldPromptAliasSetup(cfg, "codex") {
-		t.Fatalf("expected codex alias prompt when cx is disabled")
+	if shouldPromptAliasSetup(cfg, "codex") {
+		t.Fatalf("did not expect codex alias prompt when auto-setup is disabled")
 	}
-	if !shouldPromptAliasSetup(cfg, "claude") {
-		t.Fatalf("expected claude alias prompt when cc is disabled")
+	if shouldPromptAliasSetup(cfg, "claude") {
+		t.Fatalf("did not expect claude alias prompt when auto-setup is disabled")
 	}
 
 	cfg.Alias.CX.Enabled = true
 	cfg.Alias.CC.Enabled = true
 	if shouldPromptAliasSetup(cfg, "codex") {
-		t.Fatalf("did not expect codex alias prompt when cx is enabled")
+		t.Fatalf("did not expect codex alias prompt when auto-setup is disabled")
 	}
 	if shouldPromptAliasSetup(cfg, "claude") {
-		t.Fatalf("did not expect claude alias prompt when cc is enabled")
+		t.Fatalf("did not expect claude alias prompt when auto-setup is disabled")
 	}
 }
 
@@ -154,8 +150,8 @@ func TestAliasPromptAppForConfig(t *testing.T) {
 			{App: "claude", Name: "claude-1", Slot: 1},
 		},
 	}
-	if got := aliasPromptAppForConfig(cfg); got != "claude" {
-		t.Fatalf("expected claude, got %q", got)
+	if got := aliasPromptAppForConfig(cfg); got != "" {
+		t.Fatalf("expected no prompt app when auto-setup is disabled, got %q", got)
 	}
 
 	cfg.Alias.CC.Enabled = true
@@ -175,11 +171,8 @@ func TestShouldPromptAliasSetupWhenInstalledCheckFails(t *testing.T) {
 		},
 	}
 	got := shouldPromptAliasSetup(cfg, "codex")
-	if runtime.GOOS == "windows" && !got {
-		t.Fatalf("expected prompt when enabled flag is stale on windows")
-	}
-	if runtime.GOOS != "windows" && got {
-		t.Fatalf("did not expect stale-check prompt on non-windows")
+	if got {
+		t.Fatalf("did not expect prompt when auto-setup is disabled")
 	}
 }
 

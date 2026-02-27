@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -392,25 +391,7 @@ func prepareDriverProfile(appID, profileDir, provider, apiKey, baseURL, model, s
 }
 
 func shouldPromptAliasSetup(cfg config.File, appID string) bool {
-	enabled := false
-	switch strings.ToLower(strings.TrimSpace(appID)) {
-	case "codex":
-		enabled = cfg.Alias.CX.Enabled
-	case "claude":
-		enabled = cfg.Alias.CC.Enabled
-	default:
-		return true
-	}
-	if !enabled {
-		return true
-	}
-	if runtime.GOOS == "windows" {
-		ok, err := isAliasInstalledForApp(appID)
-		if err != nil {
-			return true
-		}
-		return !ok
-	}
+	// Temporary kill switch: disable auto alias setup/prompt flow.
 	return false
 }
 

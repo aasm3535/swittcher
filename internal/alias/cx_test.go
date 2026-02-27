@@ -3,6 +3,8 @@ package alias
 import (
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/charmap"
 )
 
 func TestBuildSnippetBashDefaultCX(t *testing.T) {
@@ -81,5 +83,30 @@ func TestMergeCmdAutoRun(t *testing.T) {
 	again := mergeCmdAutoRun(next, aliasFile)
 	if again != next {
 		t.Fatalf("expected idempotent autorun merge")
+	}
+}
+
+func TestIsCmdAutoRunNotFoundOutputEnglish(t *testing.T) {
+	out := []byte("ERROR: The system was unable to find the specified registry key or value.")
+	if !isCmdAutoRunNotFoundOutput(out) {
+		t.Fatalf("expected english missing-value output to be recognized")
+	}
+}
+
+func TestIsCmdAutoRunNotFoundOutputRussianCP866(t *testing.T) {
+	msg := "\u041e\u0428\u0418\u0411\u041a\u0410: \u041d\u0435 \u0443\u0434\u0430\u0435\u0442\u0441\u044f \u043d\u0430\u0439\u0442\u0438 \u0443\u043a\u0430\u0437\u0430\u043d\u043d\u044b\u0439 \u0440\u0430\u0437\u0434\u0435\u043b \u0438\u043b\u0438 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440 \u0440\u0435\u0435\u0441\u0442\u0440\u0430."
+	out, err := charmap.CodePage866.NewEncoder().Bytes([]byte(msg))
+	if err != nil {
+		t.Fatalf("encode cp866: %v", err)
+	}
+	if !isCmdAutoRunNotFoundOutput(out) {
+		t.Fatalf("expected cp866 russian missing-value output to be recognized")
+	}
+}
+
+func TestIsCmdAutoRunNotFoundOutputNegative(t *testing.T) {
+	out := []byte("ERROR: Access is denied.")
+	if isCmdAutoRunNotFoundOutput(out) {
+		t.Fatalf("did not expect access denied to be treated as missing value")
 	}
 }

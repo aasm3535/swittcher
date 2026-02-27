@@ -119,12 +119,12 @@ func TestShouldPromptAliasFromConfig(t *testing.T) {
 			{App: "codex", Name: "main", Slot: 1},
 		},
 	}
-	if !shouldPromptAliasFromConfig(cfg, "codex") {
-		t.Fatalf("expected codex alias prompt when disabled")
+	if shouldPromptAliasFromConfig(cfg, "codex") {
+		t.Fatalf("did not expect codex alias prompt when auto-setup is disabled")
 	}
 	cfg.Alias.CX.Enabled = true
 	if shouldPromptAliasFromConfig(cfg, "codex") {
-		t.Fatalf("did not expect codex alias prompt when enabled")
+		t.Fatalf("did not expect codex alias prompt when auto-setup is disabled")
 	}
 	if shouldPromptAliasFromConfig(cfg, "claude") {
 		t.Fatalf("did not expect claude alias prompt with no profiles")
@@ -180,5 +180,62 @@ func TestWelcomeEnterTransitionsToToolsWithoutQuit(t *testing.T) {
 	}
 	if got.action.Kind != "" {
 		t.Fatalf("did not expect quit action, got %q", got.action.Kind)
+	}
+}
+
+func TestRenderToolsAlwaysShowsASCIILogo(t *testing.T) {
+	cfg := config.File{OnboardingAccepted: true}
+	m := newModel(
+		State{Screen: ScreenToolPicker},
+		cfg,
+		[]driver.AppDriver{fakeDriver{id: "codex", name: "Codex CLI", available: true}},
+		nil,
+	)
+	m.width = 44
+	m.height = 20
+
+	out := m.renderTools()
+	if !strings.Contains(out, "_____") {
+		t.Fatalf("expected ascii logo in tool picker, got %q", out)
+	}
+}
+
+func TestNewModelIgnoresAliasPromptAndFallbackState(t *testing.T) {
+	store, err := config.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("new store failed: %v", err)
+	}
+	cfg := config.File{OnboardingAccepted: true}
+	m := newModel(
+		State{
+			Screen:               ScreenAccountSlots,
+			CurrentAppID:         "codex",
+			ShowAliasPrompt:      true,
+			AliasFallbackCommand: "echo stale",
+		},
+		cfg,
+		[]driver.AppDriver{fakeDriver{id: "codex", name: "Codex CLI", available: true}},
+		store,
+	)
+
+	if m.mode != modeSlots {
+		t.Fatalf("expected slots mode, got %v", m.mode)
+	}
+	if m.state.ShowAliasPrompt {
+		t.Fatalf("expected alias prompt state to be cleared")
+	}
+	if strings.TrimSpace(m.state.AliasFallbackCommand) != "" {
+		t.Fatalf("expected alias fallback command to be cleared")
+	}
+}
+
+func TestSwittcherLogoFirstLineSpacing(t *testing.T) {
+	lines := strings.Split(swittcherLogo(), "\n")
+	if len(lines) == 0 {
+		t.Fatalf("expected logo lines")
+	}
+	want := " _____       _ _   _      _"
+	if lines[0] != want {
+		t.Fatalf("unexpected first logo line:\nwant: %q\ngot:  %q", want, lines[0])
 	}
 }
