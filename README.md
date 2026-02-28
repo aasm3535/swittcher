@@ -8,6 +8,7 @@ Cross-platform Bubble Tea TUI account switcher for CLI tools.
 
 - Codex CLI (`codex`)
 - Claude Code (`claude`)
+- Gemini CLI (`gemini`)
 
 ## What changed in this build
 
@@ -76,6 +77,12 @@ Codex shortcut:
 
 ```sh
 swittcher --codex
+```
+
+Gemini shortcut:
+
+```sh
+swittcher --gemini
 ```
 
 Version:

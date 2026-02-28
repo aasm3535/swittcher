@@ -13,6 +13,7 @@ import (
 	"github.com/aasm3535/swittcher/internal/driver"
 	claudedrv "github.com/aasm3535/swittcher/internal/driver/claude"
 	"github.com/aasm3535/swittcher/internal/driver/codex"
+	geminidrv "github.com/aasm3535/swittcher/internal/driver/gemini"
 	"github.com/aasm3535/swittcher/internal/tui"
 )
 
@@ -52,12 +53,18 @@ func run(args []string) error {
 	if err := registry.Register(claudedrv.New()); err != nil {
 		return err
 	}
+	if err := registry.Register(geminidrv.New()); err != nil {
+		return err
+	}
 	jumpAppID := ""
 	if opts.CodexOnly {
 		jumpAppID = "codex"
 	}
 	if opts.ClaudeOnly {
 		jumpAppID = "claude"
+	}
+	if opts.GeminiOnly {
+		jumpAppID = "gemini"
 	}
 
 	switch opts.Command {

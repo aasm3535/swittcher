@@ -21,6 +21,7 @@ type Options struct {
 	Command     Command
 	CodexOnly   bool
 	ClaudeOnly  bool
+	GeminiOnly  bool
 	ShowVersion bool
 	ConfigDir   string
 	AddApp      string
@@ -42,6 +43,8 @@ func Parse(args []string) (Options, error) {
 			opts.CodexOnly = true
 		case arg == "--claude":
 			opts.ClaudeOnly = true
+		case arg == "--gemini":
+			opts.GeminiOnly = true
 		case arg == "--config-dir":
 			if i+1 >= len(args) {
 				return Options{}, fmt.Errorf("--config-dir requires a value")
@@ -57,8 +60,10 @@ func Parse(args []string) (Options, error) {
 		}
 	}
 
-	if opts.CodexOnly && opts.ClaudeOnly {
-		return Options{}, fmt.Errorf("--codex and --claude cannot be used together")
+	if (opts.CodexOnly && opts.ClaudeOnly) ||
+		(opts.CodexOnly && opts.GeminiOnly) ||
+		(opts.ClaudeOnly && opts.GeminiOnly) {
+		return Options{}, fmt.Errorf("--codex, --claude and --gemini are mutually exclusive")
 	}
 
 	if len(positionals) == 0 {
@@ -89,7 +94,7 @@ func HelpText() string {
 swittcher - switch CLI accounts in isolated profile homes
 
 Usage:
-  swittcher [--codex|--claude] [--config-dir PATH]
+  swittcher [--codex|--claude|--gemini] [--config-dir PATH]
   swittcher add <app> [profile-name] [--config-dir PATH]
 
 Commands:
@@ -98,6 +103,7 @@ Commands:
 Flags:
   --codex               Jump directly to codex account list
   --claude              Jump directly to claude account list
+  --gemini              Jump directly to gemini account list
   -v, --version         Print version and exit
   --config-dir PATH     Override config directory (or use SWITTCHER_CONFIG_DIR)
   -h, --help            Show help

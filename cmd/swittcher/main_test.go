@@ -36,6 +36,11 @@ func TestInitialStateJumpAppAfterOnboarding(t *testing.T) {
 	if state.CurrentAppID != "claude" {
 		t.Fatalf("expected current app claude, got %q", state.CurrentAppID)
 	}
+
+	state = initialTUIState(cfg, "gemini")
+	if state.CurrentAppID != "gemini" {
+		t.Fatalf("expected current app gemini, got %q", state.CurrentAppID)
+	}
 }
 
 func TestInitialStateSkipsAliasPromptEvenWhenProfileExists(t *testing.T) {

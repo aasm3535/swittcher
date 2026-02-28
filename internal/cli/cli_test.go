@@ -28,10 +28,34 @@ func TestParseClaudeFlag(t *testing.T) {
 	}
 }
 
+func TestParseGeminiFlag(t *testing.T) {
+	opts, err := Parse([]string{"--gemini"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if !opts.GeminiOnly {
+		t.Fatalf("expected --gemini to be true")
+	}
+	if opts.Command != CommandTUI {
+		t.Fatalf("expected tui command, got %q", opts.Command)
+	}
+}
+
 func TestParseMutuallyExclusiveJumpFlags(t *testing.T) {
 	_, err := Parse([]string{"--codex", "--claude"})
 	if err == nil {
 		t.Fatalf("expected conflict error for --codex and --claude")
+	}
+}
+
+func TestParseMutuallyExclusiveThreeJumpFlags(t *testing.T) {
+	_, err := Parse([]string{"--codex", "--gemini"})
+	if err == nil {
+		t.Fatalf("expected conflict error for --codex and --gemini")
+	}
+	_, err = Parse([]string{"--claude", "--gemini"})
+	if err == nil {
+		t.Fatalf("expected conflict error for --claude and --gemini")
 	}
 }
 
