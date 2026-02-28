@@ -34,6 +34,7 @@ jobs:
           cache: true
 
       - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           set -euo pipefail
