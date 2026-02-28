@@ -1183,7 +1183,7 @@ func buildToolOptions(drivers []driver.AppDriver) []toolOption {
 	out := make([]toolOption, 0, len(drivers))
 	for _, d := range drivers {
 		enabled := d.IsAvailable()
-		desc := "Ready"
+		desc := ""
 		if !enabled {
 			desc = "CLI not found in PATH"
 		}
@@ -1209,8 +1209,12 @@ func (m *model) renderToolRow(i int, t toolOption) string {
 		title = lipgloss.JoinHorizontal(lipgloss.Left, title, " ", betaBadgeStyle().Render("BETA"))
 	}
 
-	status := toolStatusBadgeStyle(t.Enabled).Render(t.Description)
-	row := lipgloss.JoinHorizontal(lipgloss.Left, prefix, title, "  ", status)
+	parts := []string{prefix, title}
+	if strings.TrimSpace(t.Description) != "" {
+		status := toolStatusBadgeStyle(t.Enabled).Render(t.Description)
+		parts = append(parts, "  ", status)
+	}
+	row := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 	if i == m.toolIndex {
 		return lipgloss.NewStyle().
 			Background(lipgloss.Color("#273447")).

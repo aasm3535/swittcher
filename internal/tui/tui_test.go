@@ -78,7 +78,7 @@ func TestBuildToolOptionsUsesDriverAvailability(t *testing.T) {
 	if len(opts) != 2 {
 		t.Fatalf("expected 2 options, got %d", len(opts))
 	}
-	if !opts[0].Enabled || opts[0].Description != "Ready" {
+	if !opts[0].Enabled || opts[0].Description != "" {
 		t.Fatalf("unexpected first option %+v", opts[0])
 	}
 	if opts[1].Enabled {
