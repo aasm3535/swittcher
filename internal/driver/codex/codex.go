@@ -37,6 +37,8 @@ type openAIAuthClaim struct {
 	ChatGPTAccountID string `json:"chatgpt_account_id"`
 }
 
+var usageEndpoint = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"
+
 func New() *Driver {
 	return &Driver{}
 }
@@ -85,7 +87,7 @@ func (d *Driver) Usage(profileDir string) (*driver.UsageStats, error) {
 		return &driver.UsageStats{}, nil
 	}
 
-	req, err := http.NewRequest(http.MethodGet, "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27", nil)
+	req, err := http.NewRequest(http.MethodGet, usageEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
