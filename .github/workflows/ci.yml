@@ -30,5 +30,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [[ -n "${unformatted}" ]]; then
+            echo "These files need gofmt:"
+            echo "${unformatted}"
+            exit 1
+          fi
+
+      - name: Run vet
+        run: go vet ./...
+
       - name: Run tests
         run: go test ./...
