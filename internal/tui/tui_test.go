@@ -89,6 +89,28 @@ func TestBuildToolOptionsUsesDriverAvailability(t *testing.T) {
 	}
 }
 
+func TestBuildToolOptionsMarksBetaTools(t *testing.T) {
+	drivers := []driver.AppDriver{
+		fakeDriver{id: "codex", name: "Codex CLI", available: true},
+		fakeDriver{id: "claude", name: "Claude Code", available: true},
+		fakeDriver{id: "gemini", name: "Gemini CLI", available: true},
+	}
+
+	opts := buildToolOptions(drivers)
+	if len(opts) != 3 {
+		t.Fatalf("expected 3 options, got %d", len(opts))
+	}
+	if opts[0].Beta {
+		t.Fatalf("did not expect codex to be beta")
+	}
+	if !opts[1].Beta {
+		t.Fatalf("expected claude to be beta")
+	}
+	if !opts[2].Beta {
+		t.Fatalf("expected gemini to be beta")
+	}
+}
+
 func TestAliasPreviewForApp(t *testing.T) {
 	aliasName, preview := aliasPreviewForApp("codex")
 	if aliasName != "cx" || !strings.Contains(preview, "--codex") {
@@ -197,6 +219,27 @@ func TestRenderToolsAlwaysShowsASCIILogo(t *testing.T) {
 	out := m.renderTools()
 	if !strings.Contains(out, "_____") {
 		t.Fatalf("expected ascii logo in tool picker, got %q", out)
+	}
+}
+
+func TestRenderToolsShowsBetaBadgeForBetaTools(t *testing.T) {
+	cfg := config.File{OnboardingAccepted: true}
+	m := newModel(
+		State{Screen: ScreenToolPicker},
+		cfg,
+		[]driver.AppDriver{
+			fakeDriver{id: "codex", name: "Codex CLI", available: true},
+			fakeDriver{id: "claude", name: "Claude Code", available: true},
+			fakeDriver{id: "gemini", name: "Gemini CLI", available: true},
+		},
+		nil,
+	)
+	m.width = 72
+	m.height = 20
+
+	out := m.renderTools()
+	if !strings.Contains(out, "BETA") {
+		t.Fatalf("expected BETA badge in tool picker output, got %q", out)
 	}
 }
 

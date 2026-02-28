@@ -97,6 +97,7 @@ type toolOption struct {
 	Title       string
 	Description string
 	Enabled     bool
+	Beta        bool
 }
 
 type model struct {
@@ -883,12 +884,7 @@ func (m *model) renderWelcome() string {
 func (m *model) renderTools() string {
 	lines := make([]string, 0, len(m.tools))
 	for i, t := range m.tools {
-		prefix := "  "
-		if i == m.toolIndex {
-			prefix = "> "
-		}
-		state := t.Description
-		lines = append(lines, fmt.Sprintf("%s%s  [%s]", prefix, t.Title, state))
+		lines = append(lines, m.renderToolRow(i, t))
 	}
 
 	body := panelStyle().Width(viewWidth(m.width, 70)).Render(
@@ -900,9 +896,11 @@ func (m *model) renderTools() string {
 }
 
 func (m *model) renderSlots() string {
-	lines := []string{
-		titleStyle().Render(fmt.Sprintf("%s Slots", m.currentToolTitle())),
+	slotsHeader := titleStyle().Render(fmt.Sprintf("%s Slots", m.currentToolTitle()))
+	if isBetaTool(m.state.CurrentAppID) {
+		slotsHeader = lipgloss.JoinHorizontal(lipgloss.Left, slotsHeader, " ", betaBadgeStyle().Render("BETA"))
 	}
+	lines := []string{slotsHeader}
 
 	for slot := 1; slot <= m.slotCount; slot++ {
 		selected := m.slotSelection == slot-1
@@ -978,7 +976,11 @@ func (m *model) selectedSlotSummary() (string, []string) {
 
 func (m *model) renderSidebar() string {
 	lines := make([]string, 0, m.slotCount+3)
-	lines = append(lines, sidebarSectionStyle().Render(m.currentToolTitle()))
+	sidebarHeader := sidebarSectionStyle().Render(m.currentToolTitle())
+	if isBetaTool(m.state.CurrentAppID) {
+		sidebarHeader = lipgloss.JoinHorizontal(lipgloss.Left, sidebarHeader, " ", betaBadgeStyle().Render("BETA"))
+	}
+	lines = append(lines, sidebarHeader)
 	for slot := 1; slot <= m.slotCount; slot++ {
 		selected := m.slotSelection == slot-1
 		p, ok := m.profilesBySlot[slot]
@@ -1010,6 +1012,7 @@ func (m *model) renderSidebar() string {
 
 func (m *model) renderSlotDetails() string {
 	var title, desc, meta string
+	titleWithBadge := ""
 	selectedAdd := m.isAddSlotSelected()
 	if selectedAdd {
 		title = "Add slot"
@@ -1039,9 +1042,13 @@ func (m *model) renderSlotDetails() string {
 			meta = "No account attached."
 		}
 	}
+	titleWithBadge = titleStyle().Render(title)
+	if !selectedAdd && isBetaTool(m.state.CurrentAppID) {
+		titleWithBadge = lipgloss.JoinHorizontal(lipgloss.Left, titleWithBadge, " ", betaBadgeStyle().Render("BETA"))
+	}
 
 	help := "[enter] launch/add   [a] add   [d] delete   [?] help   [q] back"
-	content := titleStyle().Render(title) + "\n" + bodyStyle().Render(desc) + "\n\n" + bodyStyle().Render(meta) + "\n\n" + renderStatusLine(m.state.StatusMessage, help)
+	content := titleWithBadge + "\n" + bodyStyle().Render(desc) + "\n\n" + bodyStyle().Render(meta) + "\n\n" + renderStatusLine(m.state.StatusMessage, help)
 	return panelStyle().
 		Width(detailsWidth(m.width)).
 		Render(content)
@@ -1185,9 +1192,32 @@ func buildToolOptions(drivers []driver.AppDriver) []toolOption {
 			Title:       d.DisplayName(),
 			Description: desc,
 			Enabled:     enabled,
+			Beta:        isBetaTool(d.ID()),
 		})
 	}
 	return out
+}
+
+func (m *model) renderToolRow(i int, t toolOption) string {
+	prefix := "  "
+	if i == m.toolIndex {
+		prefix = "> "
+	}
+
+	title := titleStyle().Render(t.Title)
+	if t.Beta {
+		title = lipgloss.JoinHorizontal(lipgloss.Left, title, " ", betaBadgeStyle().Render("BETA"))
+	}
+
+	status := toolStatusBadgeStyle(t.Enabled).Render(t.Description)
+	row := lipgloss.JoinHorizontal(lipgloss.Left, prefix, title, "  ", status)
+	if i == m.toolIndex {
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color("#273447")).
+			Foreground(lipgloss.Color("#E8EDF5")).
+			Render(row)
+	}
+	return row
 }
 
 func (m *model) defaultToolID() string {
@@ -1213,6 +1243,15 @@ func aliasPreviewForApp(appID string) (aliasName, preview string) {
 		return "cc", "cc -> swittcher --claude"
 	default:
 		return "cx", "cx -> swittcher --codex"
+	}
+}
+
+func isBetaTool(appID string) bool {
+	switch strings.ToLower(strings.TrimSpace(appID)) {
+	case "claude", "gemini":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1280,6 +1319,27 @@ func hintStyle() lipgloss.Style {
 
 func hintMutedStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("#7B8797"))
+}
+
+func betaBadgeStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#2D1B00")).
+		Background(lipgloss.Color("#F4C36A")).
+		Padding(0, 1)
+}
+
+func toolStatusBadgeStyle(enabled bool) lipgloss.Style {
+	if enabled {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#0A2A16")).
+			Background(lipgloss.Color("#89D6A7")).
+			Padding(0, 1)
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#D2D8E0")).
+		Background(lipgloss.Color("#435062")).
+		Padding(0, 1)
 }
 
 func sidebarSectionStyle() lipgloss.Style {
