@@ -55,6 +55,17 @@ Layout:
 go build -o swittcher ./cmd/swittcher
 ```
 
+## Quality checks
+
+```sh
+gofmt -w .
+go vet ./...
+go test ./...
+go test -cover ./...
+```
+
+`go test -race ./...` also works when `CGO_ENABLED=1` and a C compiler is available.
+
 ## Run
 
 ```sh
